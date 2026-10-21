@@ -25,7 +25,7 @@ cargo build --release
 ## CLI usage
 
 ```bash
-cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W]
+cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--phase-angles] [--jacobian]
 ```
 
 Example:
@@ -42,6 +42,19 @@ Notes:
 - `--no-periodic` forces every coordinate to use an ordinary linear metric. This produces a significant speedup, but the torsion entropy contribution loses some correctness.
 - `--theiler-window W` excludes temporally adjacent frames from the nearest-neighbor search: frame i's neighbor must satisfy |i - j| > W, counted in frames after `--start` and `--stride`. The default, 0, is the plain estimator. See [Correlated frames](#correlated-frames-and-the-theiler-window).
 - `--exact-constant` uses the exact finite-sample term `psi(N) - psi(1) = H_(N-1)`. The default is the common approximation `ln(N) + EulerGamma`.
+- `--tree-bonds` uses the bonds of the BAT spanning tree, including bonds to hydrogen and excluding ring closures, in place of every heavy-atom bond. See [Coordinate sets](#coordinate-sets).
+- `--phase-angles` replaces each torsion that shares its central bond with an earlier torsion by its offset from that torsion. See [Coordinate sets](#coordinate-sets).
+- `--jacobian` also prints `Mean ln J = ...`, the mean of the log BAT Jacobian over the frames used, on the line before the entropy. It requires `--tree-bonds` and cannot be combined with `--torsions-only`.
+
+## Coordinate sets
+
+By default, file-based calculations use every bond between two heavy atoms (ring closures included), plus the BAT tree's angles and torsions. Bonds to hydrogen are left out because they are usually constrained. Two options change this.
+
+**Tree bonds** (`--tree-bonds`, `tree_bonds=True`, `BondSet::Tree`) use the bonds of the BAT spanning tree: the two root bonds and the bond that places each later atom, with hydrogens included and ring closures left out. Together with the angles and torsions, this gives exactly 3N - 6 non-redundant coordinates per molecule (one bond for a diatomic, including one with hydrogen). This is the coordinate set the BAT Jacobian is defined for.
+
+**Phase angles** (`--phase-angles`, `phase_angles=True`, `CoordinateOptions::phase_angles`) group the torsions by central bond. The first torsion about each bond, in coordinate order, keeps its value. Every later torsion about that bond is replaced by its offset from the first one, wrapped to (-π, π]. The offset is still a 2π-periodic coordinate. Because the map is a shear with unit Jacobian, the joint entropy of the full coordinate set is unchanged. A truncated MIE is not invariant, though. The raw torsions of atoms that rotate together, such as the three hydrogens of a methyl group, are strongly correlated, and a second-order expansion misses part of that correlation. Their offsets are stiff and nearly independent of the reference torsion, so less correlation is left beyond second order. Phase angles work with either bond set and with `--torsions-only`.
+
+**The BAT Jacobian** (`--jacobian`, `System.mean_log_jacobian`, `InternalCoordinates::log_jacobian`) is ln J = Σ 2 ln b + Σ ln sin θ over the tree's bonds and angles. Adding its mean to the BAT entropy gives the entropy of the internal motion measured in Cartesian coordinates. Bond lengths are in the trajectory's units (Å for Amber), so ln J depends on that choice, just as the bond-length entropies do. Phase angles do not change it.
 
 ## Rust library usage
 
@@ -70,14 +83,30 @@ Every estimator takes the same options:
 - `estimate_coordinate_mutual_information(data, frames_end, &options)` returns the mutual information of each coordinate pair.
 - `calc_joint_nn([&x, &y, ...], metrics)` is the underlying nearest-neighbor sum, `sum over frames of ln(nearest-neighbor distance)`, in 1 to 4 dimensions. `calc_joint_nn_with_window(coordinates, metrics, w)` is the same sum with a Theiler window.
 
+To build coordinates from files, use `bat_library::InternalCoordinates`:
+
+```rust
+use nn_entropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
+
+let options = CoordinateOptions { bonds: BondSet::Tree, phase_angles: true };
+let mut internal = InternalCoordinates::with_options(&top, options)?; // ::new(&top) for the defaults
+internal.calculate_internal_coords(&traj, usize::MAX, false)?;
+let metrics = internal.coordinate_metrics();   // one per coordinate
+let atoms = internal.coordinate_atoms();       // topology atom indices of each coordinate
+let references = internal.phase_references();  // Some(i) for a phase angle of torsion i
+let log_jacobian = internal.log_jacobian()?;   // per frame; tree bonds only
+```
+
+`internal.int_coords` holds the values with shape `[n_frames][n_coords]`.
+
 ## Python bindings
 
 The crate exposes a `nn_entropy` Python module (built from `src/pyo3_api.rs`) with:
-- `load_system(top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None)`
+- `load_system(top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None, tree_bonds=False, phase_angles=False)`. See [Coordinate sets](#coordinate-sets).
 - `estimate_entropy(data_or_system, mie_order=None, periods=None, exact_constant=False)`. `mie_order` defaults to 2; `mie_order=1` gives the sum of the marginal entropies.
 - `estimate_coordinate_entropy(data_or_system, mie_order=None, periods=None, exact_constant=False)`. Returns each coordinate's share of the entropy; `mie_order` defaults to 2 and must be 1 or 2. The values sum to `estimate_entropy` at the same order.
 - `estimate_coordinate_mutual_information(data_or_system, periods=None, exact_constant=False)`
-- `System` has the same three estimators as methods, each taking `exact_constant` (and `mie_order` for the two entropy estimators).
+- `System` has the same three estimators as methods, each taking `exact_constant` (and `mie_order` for the two entropy estimators). Its `mean_log_jacobian` property is the mean log BAT Jacobian over the selected frames. It raises `ValueError` unless the system was loaded with `tree_bonds=True` and without `torsions_only`.
 - To start from an Amber topology and trajectory, call `load_system(...)` once and use the `System` methods or pass the `System` to any estimator. The coordinate metrics come from the generated BAT coordinates automatically, and the trajectory is only read once no matter how many quantities you compute.
 
 `exact_constant=True` uses the exact finite-sample term, like the CLI's `--exact-constant`. Every estimator, as a module function or a `System` method, also takes `theiler_window=0`, like the CLI's `--theiler-window`.
@@ -113,7 +142,7 @@ Threading note:
 - Results are differential internal-coordinate entropies in natural-log units (equivalently, units of `k_B`), not kcal mol⁻¹ K⁻¹.
 - To remain numerically compatible with the historical Python implementation, the nearest-neighbor constant uses the large-sample approximation `ln(N) + EulerGamma` in place of the exact finite-sample term `psi(N) - psi(1) = H_(N-1)`. Their per-entropy difference is approximately `1/(2N)` and is negligible for the intended 50,000-frame calculations, but it can accumulate across MIE terms or become important for very small samples. The convention is a property of the estimator, not of the total alone: pairwise mutual information shifts by exactly `H_(N-1) - (ln(N) + EulerGamma)` per pair when it changes, so per-coordinate results must be computed under the same convention as the total they are compared against.
 - The default second-order mutual-information expansion is a truncation and can omit higher-order correlations.
-- The reported value does not include a BAT-to-Cartesian Jacobian correction, momentum entropy, or a standard-state term, and must not be described as an absolute thermodynamic entropy.
+- The reported value does not include a BAT-to-Cartesian Jacobian correction, momentum entropy, or a standard-state term, and must not be described as an absolute thermodynamic entropy. `--jacobian` reports the Jacobian term separately, for the tree bond set, but does not add it to the total.
 - Exact duplicate samples use the nearest distinct coordinate point. Many ties usually indicate inadequate coordinate precision or sampling and should be investigated.
 - MD frames are generally correlated. See below.
 - Corrected file-based results differ from historical versions because torsions are now periodic; the historical asymptotic finite-sample constant is retained for Python compatibility.
@@ -148,6 +177,7 @@ The suite is split by concern:
 | `tests/invariance.rs` | Translation, reflection, relabeling, frame reordering, scaling equivariance, periodic rotation, and floating-point behavior. |
 | `tests/geometry.rs` | Bonds, angles and torsions from constructed configurations; the torsion sign convention; the end-to-end BAT path on the fixture. |
 | `tests/validation.rs` | The input-validation contract: which inputs are refused and what each error says. |
+| `tests/coordinates.rs` | Coordinate sets: 3N - 6 tree bonds forming a spanning tree, phase angles as wrapped torsion offsets that are stiff for a rigid rotor, and the BAT Jacobian against the constructed geometry. |
 | `tests/theiler.rs` | Theiler window: bitwise equality with the plain estimator at `W = 0`, brute-force agreement for every window and dimension, the closed-form constant, validation, and AR(1) bias behavior. |
 | `tests/testing.rs`, `tests/entropy.rs`, `tests/cli.rs` | Unit tests, fixture regressions, and CLI behavior. |
 

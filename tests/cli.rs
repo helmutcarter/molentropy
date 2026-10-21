@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use nn_entropy::bat_library::InternalCoordinates;
+use nn_entropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
 use nn_entropy::{CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy};
 
 fn fixture(rel: &str) -> PathBuf {
@@ -169,4 +169,83 @@ fn theiler_window_wider_than_the_trajectory_is_rejected() {
     let output = run_cli(&["--theiler-window", "2"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Theiler window 2"));
+}
+
+#[test]
+fn coordinate_flags_reach_the_coordinates_and_the_jacobian() {
+    let output = run_cli(&[
+        "--tree-bonds",
+        "--phase-angles",
+        "--jacobian",
+        "--stride",
+        "2",
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 2, "unexpected output: {stdout}");
+    assert!(lines[0].starts_with("Mean ln J = "));
+    assert!(lines[1].starts_with("Total entropy = "));
+    let value = |line: &str| line.split('=').next_back().unwrap().trim().parse::<f64>();
+
+    let top = fixture("tests/fixtures/test.parm7");
+    let traj = fixture("tests/fixtures/test.nc");
+    let options = CoordinateOptions {
+        bonds: BondSet::Tree,
+        phase_angles: true,
+    };
+    let mut internal = InternalCoordinates::with_options(&top, options).unwrap();
+    internal
+        .calculate_internal_coords(&traj, usize::MAX, false)
+        .unwrap();
+    let metrics = internal.coordinate_metrics();
+    let log_jacobian: Vec<f64> = internal
+        .log_jacobian()
+        .unwrap()
+        .into_iter()
+        .step_by(2)
+        .collect();
+    let frames: Vec<&Vec<f64>> = internal.int_coords.iter().step_by(2).collect();
+    let mut data = vec![Vec::with_capacity(frames.len()); metrics.len()];
+    for frame in &frames {
+        for (dimension, value) in frame.iter().enumerate() {
+            data[dimension].push(*value);
+        }
+    }
+    let expected_entropy = calculate_entropy(
+        &data,
+        frames.len(),
+        2,
+        &EntropyOptions {
+            metrics: Some(&metrics),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let expected_log_jacobian = log_jacobian.iter().sum::<f64>() / log_jacobian.len() as f64;
+    assert!((value(lines[0]).unwrap() - expected_log_jacobian).abs() < 1e-12);
+    assert!((value(lines[1]).unwrap() - expected_entropy).abs() < 1e-12);
+}
+
+#[test]
+fn default_output_is_only_the_entropy() {
+    let output = run_cli(&[]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.lines().count(), 1, "unexpected output: {stdout}");
+    assert!(stdout.starts_with("Total entropy = "));
+}
+
+#[test]
+fn jacobian_without_the_tree_bond_set_is_rejected() {
+    for args in [
+        &["--jacobian"][..],
+        &["--jacobian", "--tree-bonds", "--torsions-only"][..],
+    ] {
+        let output = run_cli(args);
+        assert!(!output.status.success(), "{args:?} should fail");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("--jacobian requires --tree-bonds")
+        );
+    }
 }

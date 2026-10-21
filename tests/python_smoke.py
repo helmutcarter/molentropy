@@ -16,6 +16,7 @@ Run against an installed wheel:
 
 import math
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -164,6 +165,41 @@ def check_invalid_period_is_rejected():
         raise AssertionError("a negative period should raise ValueError")
 
 
+def check_coordinate_options():
+    """Phase angles rewrite only torsions; the Jacobian needs the tree bond set.
+
+    The values themselves are checked in tests/coordinates.rs; this checks that
+    the keyword arguments reach the Rust options and the getter behaves.
+    """
+    fixtures = Path(__file__).resolve().parent / "fixtures"
+    top, traj = str(fixtures / "test.parm7"), str(fixtures / "test.nc")
+
+    plain = nn_entropy.load_system(top, traj)
+    phase = nn_entropy.load_system(top, traj, phase_angles=True)
+    assert plain.coordinates == phase.coordinates
+    changed = set()
+    for index, (period, a, b) in enumerate(zip(plain.periods, plain.data, phase.data)):
+        if a != b:
+            assert period is not None, f"phase angles changed non-torsion {index}"
+            changed.add(index)
+    assert changed, "phase_angles=True changed no torsion"
+
+    try:
+        plain.mean_log_jacobian
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("mean_log_jacobian needs tree_bonds=True")
+
+    tree = nn_entropy.load_system(top, traj, tree_bonds=True, phase_angles=True)
+    assert tree.coordinates > plain.coordinates, "tree bonds should add X-H bonds"
+    assert math.isfinite(tree.mean_log_jacobian)
+    print(
+        f"coordinate options: {len(changed)} phase angles, "
+        f"mean ln J {tree.mean_log_jacobian!r}"
+    )
+
+
 def main():
     for check in (
         check_exports,
@@ -175,6 +211,7 @@ def main():
         check_translation_invariance,
         check_periodic_metric_accepted,
         check_invalid_period_is_rejected,
+        check_coordinate_options,
     ):
         check()
     print("\nall smoke checks passed")
