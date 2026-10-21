@@ -303,6 +303,7 @@ fn both_finite_sample_conventions_are_accepted_everywhere() {
                 &EntropyOptions {
                     metrics: Some(&metrics),
                     constant,
+                    ..Default::default()
                 },
             )
             .expect("valid input should be accepted");

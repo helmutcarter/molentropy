@@ -78,6 +78,21 @@ impl Rng {
         (0..n).map(|_| self.exponential(lambda)).collect()
     }
 
+    /// Stationary AR(1) series x_(t+1) = phi x_t + sqrt(1 - phi^2) e_t, whose
+    /// marginal is exactly standard normal while consecutive samples have
+    /// correlation `phi`: a stand-in for an oversampled MD coordinate.
+    pub fn ar1_vec(&mut self, n: usize, phi: f64) -> Vec<f64> {
+        let innovation = (1.0 - phi * phi).sqrt();
+        let mut x = self.normal();
+        (0..n)
+            .map(|_| {
+                let current = x;
+                x = phi * x + innovation * self.normal();
+                current
+            })
+            .collect()
+    }
+
     /// A correlated standard bivariate normal pair with correlation `rho`.
     pub fn correlated_normal_pair(&mut self, n: usize, rho: f64) -> (Vec<f64>, Vec<f64>) {
         let mut xs = Vec::with_capacity(n);
@@ -174,6 +189,16 @@ fn axis_separation(a: f64, b: f64, metric: CoordinateMetric) -> f64 {
 /// exactly with others measures to the nearest point at a different position
 /// rather than to its own duplicates.
 pub fn brute_force_log_nn_sum(coordinates: &[&[f64]], metrics: &[CoordinateMetric]) -> f64 {
+    brute_force_log_nn_sum_windowed(coordinates, metrics, 0)
+}
+
+/// `brute_force_log_nn_sum` restricted to neighbors j with |i - j| > `window`,
+/// the brute-force equivalent of `calc_joint_nn_with_window`.
+pub fn brute_force_log_nn_sum_windowed(
+    coordinates: &[&[f64]],
+    metrics: &[CoordinateMetric],
+    window: usize,
+) -> f64 {
     assert_eq!(coordinates.len(), metrics.len());
     let n_points = coordinates[0].len();
     assert!(coordinates.iter().all(|c| c.len() == n_points));
@@ -191,7 +216,7 @@ pub fn brute_force_log_nn_sum(coordinates: &[&[f64]], metrics: &[CoordinateMetri
         let pi = point(i);
         let mut nearest = f64::INFINITY;
         for j in 0..n_points {
-            if i == j {
+            if i.abs_diff(j) <= window {
                 continue;
             }
             let pj = point(j);
@@ -212,7 +237,7 @@ pub fn brute_force_log_nn_sum(coordinates: &[&[f64]], metrics: &[CoordinateMetri
         }
         assert!(
             nearest.is_finite(),
-            "sample {i} has no distinct neighbor; the reference needs >= 2 distinct points"
+            "sample {i} has no distinct neighbor outside window {window}"
         );
         total += nearest.ln();
     }

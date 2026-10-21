@@ -106,8 +106,67 @@ fn exact_constant_flag_selects_exact_finite_sample_term() {
         &EntropyOptions {
             metrics: Some(&metrics),
             constant: FiniteSampleConstant::Exact,
+            ..Default::default()
         },
     )
     .unwrap();
     assert!((parse_entropy(&output.stdout) - expected).abs() < 1e-12);
+}
+
+fn run_cli(extra: &[&str]) -> std::process::Output {
+    let top = fixture("tests/fixtures/test.parm7");
+    let traj = fixture("tests/fixtures/test.nc");
+    let mut args = vec![
+        top.to_str().unwrap().to_string(),
+        traj.to_str().unwrap().to_string(),
+    ];
+    args.extend(extra.iter().map(|arg| arg.to_string()));
+    Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+        .args(args)
+        .output()
+        .expect("failed to run CLI")
+}
+
+#[test]
+fn theiler_window_flag_reaches_the_estimator() {
+    let unwindowed = run_cli(&[]);
+    let zero = run_cli(&["--theiler-window", "0"]);
+    let one = run_cli(&["--theiler-window", "1"]);
+    assert!(unwindowed.status.success() && zero.status.success() && one.status.success());
+    assert_eq!(unwindowed.stdout, zero.stdout);
+
+    let top = fixture("tests/fixtures/test.parm7");
+    let traj = fixture("tests/fixtures/test.nc");
+    let mut internal = InternalCoordinates::new(&top).unwrap();
+    internal
+        .calculate_internal_coords(&traj, usize::MAX, false)
+        .unwrap();
+    let metrics = internal.coordinate_metrics();
+    let frames = internal.int_coords.len();
+    let mut data = vec![Vec::with_capacity(frames); metrics.len()];
+    for frame in internal.int_coords {
+        for (dimension, value) in frame.into_iter().enumerate() {
+            data[dimension].push(value);
+        }
+    }
+    let expected = calculate_entropy(
+        &data,
+        frames,
+        2,
+        &EntropyOptions {
+            metrics: Some(&metrics),
+            theiler_window: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!((parse_entropy(&one.stdout) - expected).abs() < 1e-12);
+}
+
+#[test]
+fn theiler_window_wider_than_the_trajectory_is_rejected() {
+    // The fixture has five frames; w = 2 needs six.
+    let output = run_cli(&["--theiler-window", "2"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Theiler window 2"));
 }

@@ -82,6 +82,32 @@ def check_exact_constant_closed_form():
     print(f"order-1 exact closed form: {got!r}")
 
 
+def check_theiler_window_closed_form():
+    """Four frames one unit apart with theiler_window=1.
+
+    Every frame's nearest neighbor outside the window is two units away, and
+    frames 0 and 3 keep n_i = 3 candidates while frames 1 and 2 keep n_i = 2,
+    so the exact estimate is ln(2) + ln(V_1) + mean(H_(n_i - 1))
+    = 2 ln(2) + (1.5 + 1 + 1 + 1.5) / 4.
+    """
+    data = np.array([[0.0, 1.0, 2.0, 3.0]])
+    got = nn_entropy.estimate_entropy(
+        data, mie_order=1, exact_constant=True, theiler_window=1
+    )
+    want = 2.0 * math.log(2.0) + 1.25
+    assert abs(got - want) < 1e-12, f"theiler window: got {got!r}, want {want!r}"
+    assert nn_entropy.estimate_entropy(data, mie_order=1) == nn_entropy.estimate_entropy(
+        data, mie_order=1, theiler_window=0
+    )
+    try:
+        nn_entropy.estimate_entropy(data, mie_order=1, theiler_window=2)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a window wider than the series should raise ValueError")
+    print(f"theiler window closed form: {got!r}")
+
+
 def check_coordinate_entropies_sum_to_total():
     """The order-1 total is by definition the sum of the per-coordinate values."""
     rng = np.random.default_rng(0)
@@ -143,6 +169,7 @@ def main():
         check_exports,
         check_closed_form_entropy,
         check_exact_constant_closed_form,
+        check_theiler_window_closed_form,
         check_coordinate_entropies_sum_to_total,
         check_mie_entropy_sums_to_second_order_total,
         check_translation_invariance,

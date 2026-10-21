@@ -25,7 +25,7 @@ cargo build --release
 ## CLI usage
 
 ```bash
-cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4]
+cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W]
 ```
 
 Example:
@@ -40,6 +40,7 @@ Notes:
 - `--stride` retains every Nth frame after `--start` (default: 1). Choose a stride based on a separate correlation-time analysis; the crate does not estimate an effective sample size automatically.
 - `--mie-order` selects the expansion order. The default is 2, and this should be good for most applications.
 - `--no-periodic` forces every coordinate to use an ordinary linear metric. This produces a significant speedup, but the torsion entropy contribution loses some correctness.
+- `--theiler-window W` excludes temporally adjacent frames from the nearest-neighbor search: frame i's neighbor must satisfy |i - j| > W, counted in frames after `--start` and `--stride`. The default, 0, is the plain estimator. See [Correlated frames](#correlated-frames-and-the-theiler-window).
 - `--exact-constant` uses the exact finite-sample term `psi(N) - psi(1) = H_(N-1)`. The default is the common approximation `ln(N) + EulerGamma`.
 
 ## Rust library usage
@@ -58,15 +59,16 @@ let options = EntropyOptions {
 let entropy = calculate_entropy(&one_d_data, frames_end, 2, &options)?;
 ```
 
-`EntropyOptions` has two fields:
+`EntropyOptions` has three fields:
 - `metrics`: per-coordinate `CoordinateMetric::Linear` or `CoordinateMetric::Periodic { period }`. The default, `None`, treats every coordinate as linear.
 - `constant`: `FiniteSampleConstant::PythonCompatibleAsymptotic` (the default) or `FiniteSampleConstant::Exact`.
+- `theiler_window`: frames j with |i - j| <= `theiler_window` are never frame i's nearest neighbor. The default, 0, excludes only frame i itself.
 
 Every estimator takes the same options:
 - `calculate_entropy(data, frames_end, mie_order, &options)` returns the total entropy at MIE order 1, 2, 3 or 4.
 - `estimate_coordinate_entropy(data, frames_end, mie_order, &options)` returns each coordinate's share of the entropy at MIE order 1 or 2, so the values sum to `calculate_entropy` at the same order and with the same options. Order 1 gives the marginal entropies. Order 2 also splits each pairwise mutual information term evenly between its two coordinates. Orders 3 and 4 are rejected.
 - `estimate_coordinate_mutual_information(data, frames_end, &options)` returns the mutual information of each coordinate pair.
-- `calc_joint_nn([&x, &y, ...], metrics)` is the underlying nearest-neighbor sum, `sum over frames of ln(nearest-neighbor distance)`, in 1 to 4 dimensions.
+- `calc_joint_nn([&x, &y, ...], metrics)` is the underlying nearest-neighbor sum, `sum over frames of ln(nearest-neighbor distance)`, in 1 to 4 dimensions. `calc_joint_nn_with_window(coordinates, metrics, w)` is the same sum with a Theiler window.
 
 ## Python bindings
 
@@ -78,7 +80,7 @@ The crate exposes a `nn_entropy` Python module (built from `src/pyo3_api.rs`) wi
 - `System` has the same three estimators as methods, each taking `exact_constant` (and `mie_order` for the two entropy estimators).
 - To start from an Amber topology and trajectory, call `load_system(...)` once and use the `System` methods or pass the `System` to any estimator. The coordinate metrics come from the generated BAT coordinates automatically, and the trajectory is only read once no matter how many quantities you compute.
 
-`exact_constant=True` uses the exact finite-sample term, like the CLI's `--exact-constant`.
+`exact_constant=True` uses the exact finite-sample term, like the CLI's `--exact-constant`. Every estimator, as a module function or a `System` method, also takes `theiler_window=0`, like the CLI's `--theiler-window`.
 
 For a raw array, `periods` is a sequence with one entry per coordinate. Use `None` for a linear dimension and a positive period for a periodic dimension. Omitting `periods` preserves the linear behavior of the original raw-array API.
 
@@ -113,8 +115,22 @@ Threading note:
 - The default second-order mutual-information expansion is a truncation and can omit higher-order correlations.
 - The reported value does not include a BAT-to-Cartesian Jacobian correction, momentum entropy, or a standard-state term, and must not be described as an absolute thermodynamic entropy.
 - Exact duplicate samples use the nearest distinct coordinate point. Many ties usually indicate inadequate coordinate precision or sampling and should be investigated.
-- MD frames are generally correlated. Use a defensible stride or otherwise decorrelate the samples before interpreting the estimate.
+- MD frames are generally correlated. See below.
 - Corrected file-based results differ from historical versions because torsions are now periodic; the historical asymptotic finite-sample constant is retained for Python compatibility.
+
+## Correlated frames and the Theiler window
+
+The Kozachenko-Leonenko estimator assumes independent samples. When frames are saved faster than a coordinate decorrelates, a frame's nearest neighbor is usually the frame before or after it. That distance measures how far the system moves in one output interval, not the density of states, so entropies come out low. The error grows with the number of dimensions, so it does not cancel in the MIE: oversampled independent coordinates show spurious positive mutual information.
+
+A Theiler window of `W` frames keeps every frame as a query point but takes its nearest neighbor only from frames more than `W` away in time. Each frame's finite-sample term uses the number of frames it can actually compete against, so the window does not bias the estimate for independent samples. Unlike `--stride`, it discards no data. Frames are counted after `--start` and `--stride`, and the series must have at least `2W + 2` frames.
+
+What the validation shows (`tests/theiler.rs`):
+- On an AR(1) series with lag-one correlation 0.99, the mutual information of two independent coordinates is +0.044 at `W = 0` and about 0 at `W = 5`.
+- On mildly correlated series (lag-one correlation 0.95), any `W` of a few frames or more removes the bias and leaves the estimate on a plateau. RMSE is lower than with any stride.
+- On strongly oversampled series the window over-corrects as `W` grows. The frames that remain eligible come in clusters, one per visit to a region, which lengthens nearest-neighbor distances. Mutual information then turns negative, about -0.04 at `W >= 50` in the example above. A window is not a substitute for adequate sampling.
+- On 100 ns production runs of small solvated ligands saved every 2 ps (50,000 frames), the order-2 total changes by at most about 0.4 k_B across `W = 0` to `250` (three ligands), while striding moves it by 10-20 k_B. At that spacing the frames are already effectively decorrelated, so the plain estimator is fine there.
+
+Use a window when output is dense compared with the coordinates' correlation times. Choose `W` from a sweep: plot the entropy against `W` and take a value where the curve has stopped moving for the fast coordinates. Prefer a window to a stride when the goal is only to remove temporal neighbors.
 
 ## Tests
 
@@ -132,6 +148,7 @@ The suite is split by concern:
 | `tests/invariance.rs` | Translation, reflection, relabeling, frame reordering, scaling equivariance, periodic rotation, and floating-point behavior. |
 | `tests/geometry.rs` | Bonds, angles and torsions from constructed configurations; the torsion sign convention; the end-to-end BAT path on the fixture. |
 | `tests/validation.rs` | The input-validation contract: which inputs are refused and what each error says. |
+| `tests/theiler.rs` | Theiler window: bitwise equality with the plain estimator at `W = 0`, brute-force agreement for every window and dimension, the closed-form constant, validation, and AR(1) bias behavior. |
 | `tests/testing.rs`, `tests/entropy.rs`, `tests/cli.rs` | Unit tests, fixture regressions, and CLI behavior. |
 
 Expected values in `analytic.rs`, `reference.rs`, `invariance.rs` and `geometry.rs`

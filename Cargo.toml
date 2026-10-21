@@ -8,7 +8,7 @@ name = "nn_entropy"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-kiddo = "5.0.3"
+kiddo = "5.3.1"
 rayon = "1.5"
 numpy = "0.21"
 pyo3 = { version = "0.21", features = ["extension-module"] }

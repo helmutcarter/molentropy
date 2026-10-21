@@ -10,7 +10,11 @@ fn to_py_err<E: std::fmt::Display>(err: E) -> PyErr {
     pyo3::exceptions::PyRuntimeError::new_err(err.to_string())
 }
 
-fn entropy_options(metrics: &[CoordinateMetric], exact_constant: bool) -> EntropyOptions<'_> {
+fn entropy_options(
+    metrics: &[CoordinateMetric],
+    exact_constant: bool,
+    theiler_window: usize,
+) -> EntropyOptions<'_> {
     EntropyOptions {
         metrics: Some(metrics),
         constant: if exact_constant {
@@ -18,6 +22,7 @@ fn entropy_options(metrics: &[CoordinateMetric], exact_constant: bool) -> Entrop
         } else {
             FiniteSampleConstant::PythonCompatibleAsymptotic
         },
+        theiler_window,
     }
 }
 
@@ -174,53 +179,56 @@ impl System {
             .collect()
     }
 
-    #[pyo3(signature = (mie_order=None, exact_constant=false))]
+    #[pyo3(signature = (mie_order=None, exact_constant=false, theiler_window=0))]
     fn estimate_entropy(
         &self,
         py: Python<'_>,
         mie_order: Option<usize>,
         exact_constant: bool,
+        theiler_window: usize,
     ) -> PyResult<f64> {
         py.allow_threads(|| {
             crate::calculate_entropy(
                 &self.one_d_data,
                 self.frames,
                 mie_order.unwrap_or(2),
-                &entropy_options(&self.metrics, exact_constant),
+                &entropy_options(&self.metrics, exact_constant, theiler_window),
             )
             .map_err(pyo3::exceptions::PyValueError::new_err)
         })
     }
 
-    #[pyo3(signature = (mie_order=None, exact_constant=false))]
+    #[pyo3(signature = (mie_order=None, exact_constant=false, theiler_window=0))]
     fn estimate_coordinate_entropy(
         &self,
         py: Python<'_>,
         mie_order: Option<usize>,
         exact_constant: bool,
+        theiler_window: usize,
     ) -> PyResult<Vec<f64>> {
         py.allow_threads(|| {
             crate::estimate_coordinate_entropy(
                 &self.one_d_data,
                 self.frames,
                 mie_order.unwrap_or(2),
-                &entropy_options(&self.metrics, exact_constant),
+                &entropy_options(&self.metrics, exact_constant, theiler_window),
             )
             .map_err(pyo3::exceptions::PyValueError::new_err)
         })
     }
 
-    #[pyo3(signature = (exact_constant=false))]
+    #[pyo3(signature = (exact_constant=false, theiler_window=0))]
     fn estimate_coordinate_mutual_information(
         &self,
         py: Python<'_>,
         exact_constant: bool,
+        theiler_window: usize,
     ) -> PyResult<Vec<f64>> {
         py.allow_threads(|| {
             crate::estimate_coordinate_mutual_information(
                 &self.one_d_data,
                 self.frames,
-                &entropy_options(&self.metrics, exact_constant),
+                &entropy_options(&self.metrics, exact_constant, theiler_window),
             )
             .map_err(pyo3::exceptions::PyValueError::new_err)
         })
@@ -249,13 +257,14 @@ fn load_system(
 
 /// Total entropy from a mutual information expansion of order `mie_order`
 /// (default 2; order 1 is the sum of marginal entropies).
-#[pyfunction(signature = (data, mie_order=None, periods=None, exact_constant=false))]
+#[pyfunction(signature = (data, mie_order=None, periods=None, exact_constant=false, theiler_window=0))]
 fn estimate_entropy(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
     mie_order: Option<usize>,
     periods: Option<Vec<Option<f64>>>,
     exact_constant: bool,
+    theiler_window: usize,
 ) -> PyResult<f64> {
     let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods)?;
     py.allow_threads(move || {
@@ -263,7 +272,7 @@ fn estimate_entropy(
             &one_d_data,
             frames_end,
             mie_order.unwrap_or(2),
-            &entropy_options(&metrics, exact_constant),
+            &entropy_options(&metrics, exact_constant, theiler_window),
         )
         .map_err(pyo3::exceptions::PyValueError::new_err)
     })
@@ -272,13 +281,14 @@ fn estimate_entropy(
 /// Each coordinate's share of the order-`mie_order` entropy (default 2). The
 /// values sum to `estimate_entropy` at the same order; order 1 gives the
 /// marginal entropies.
-#[pyfunction(signature = (data, mie_order=None, periods=None, exact_constant=false))]
+#[pyfunction(signature = (data, mie_order=None, periods=None, exact_constant=false, theiler_window=0))]
 fn estimate_coordinate_entropy(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
     mie_order: Option<usize>,
     periods: Option<Vec<Option<f64>>>,
     exact_constant: bool,
+    theiler_window: usize,
 ) -> PyResult<Vec<f64>> {
     let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods)?;
     py.allow_threads(move || {
@@ -286,26 +296,27 @@ fn estimate_coordinate_entropy(
             &one_d_data,
             frames_end,
             mie_order.unwrap_or(2),
-            &entropy_options(&metrics, exact_constant),
+            &entropy_options(&metrics, exact_constant, theiler_window),
         )
         .map_err(pyo3::exceptions::PyValueError::new_err)
     })
 }
 
 // Create python wrapper to take BAT coordinates and return a numpy array with the mutual information for each coordinate pair
-#[pyfunction(signature = (data, periods=None, exact_constant=false))]
+#[pyfunction(signature = (data, periods=None, exact_constant=false, theiler_window=0))]
 fn estimate_coordinate_mutual_information(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
     periods: Option<Vec<Option<f64>>>,
     exact_constant: bool,
+    theiler_window: usize,
 ) -> PyResult<Vec<f64>> {
     let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods)?;
     py.allow_threads(move || {
         crate::estimate_coordinate_mutual_information(
             &one_d_data,
             frames_end,
-            &entropy_options(&metrics, exact_constant),
+            &entropy_options(&metrics, exact_constant, theiler_window),
         )
         .map_err(pyo3::exceptions::PyValueError::new_err)
     })

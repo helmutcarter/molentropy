@@ -377,3 +377,27 @@ fn expansion_coefficients_hold_under_mixed_metrics() {
         assert_close(actual, expected, 1e-8, &format!("mixed order {order}"));
     }
 }
+
+#[test]
+fn search_is_exact_when_an_axis_has_many_repeated_values() {
+    // kiddo releases before 5.3.1 could report a different item at distance 0
+    // when many points shared a value on a split axis, which turned one frame's
+    // log distance into -inf. A torsion quantized to a coarse grid is the
+    // shape that triggered it.
+    let mut rng = Rng::new(21);
+    let _burn_in = rng.ar1_vec(250, 0.95);
+    let grid: Vec<f64> = (0..250)
+        .map(|_| (rng.uniform_range(0.0, PERIOD) / 0.2).round() * 0.2)
+        .collect();
+    let b = rng.ar1_vec(250, 0.8);
+    let c = rng.uniform_vec(250, -1.0, 1.0);
+    let metrics = [
+        CoordinateMetric::Periodic { period: PERIOD },
+        CoordinateMetric::Linear,
+        CoordinateMetric::Linear,
+    ];
+    let actual = calc_joint_nn([&grid, &b, &c], metrics).unwrap();
+    let expected = brute_force_log_nn_sum(&[&grid, &b, &c], &metrics);
+    assert!(actual.is_finite(), "log-distance sum {actual}");
+    assert_close(actual, expected, 1e-9, "repeated-value axis");
+}

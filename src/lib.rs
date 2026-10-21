@@ -90,6 +90,7 @@ fn entropy_constant_with_convention(
     n_frames: usize,
     dimensions: usize,
     convention: FiniteSampleConstant,
+    theiler_window: usize,
 ) -> Result<f64, String> {
     let log_unit_ball_volume = match dimensions {
         1 => 2.0_f64.ln(),
@@ -102,14 +103,52 @@ fn entropy_constant_with_convention(
             ));
         }
     };
+    validate_theiler_window(n_frames, theiler_window)?;
     const EULER_MASCHERONI: f64 = 0.57721566490153;
-    let sample_term = match convention {
-        FiniteSampleConstant::PythonCompatibleAsymptotic => {
-            (n_frames as f64).ln() + EULER_MASCHERONI
-        }
-        FiniteSampleConstant::Exact => (1..n_frames).map(|i| 1.0 / i as f64).sum(),
-    };
-    Ok(sample_term + log_unit_ball_volume)
+    if theiler_window == 0 {
+        let sample_term = match convention {
+            FiniteSampleConstant::PythonCompatibleAsymptotic => {
+                (n_frames as f64).ln() + EULER_MASCHERONI
+            }
+            FiniteSampleConstant::Exact => (1..n_frames).map(|i| 1.0 / i as f64).sum(),
+        };
+        return Ok(sample_term + log_unit_ball_volume);
+    }
+
+    // Frame i competes against n_i - 1 eligible neighbors, where n_i is N minus
+    // the other frames inside its Theiler window, so the sample term
+    // psi(N) - psi(1) becomes the mean over frames of psi(n_i) - psi(1).
+    let harmonic: Vec<f64> = std::iter::once(0.0)
+        .chain((1..n_frames).scan(0.0, |total, i| {
+            *total += 1.0 / i as f64;
+            Some(*total)
+        }))
+        .collect();
+    let sample_term_total: f64 = (0..n_frames)
+        .map(|frame| {
+            let excluded = frame.min(theiler_window) + (n_frames - 1 - frame).min(theiler_window);
+            let candidates = n_frames - excluded;
+            match convention {
+                FiniteSampleConstant::PythonCompatibleAsymptotic => {
+                    (candidates as f64).ln() + EULER_MASCHERONI
+                }
+                FiniteSampleConstant::Exact => harmonic[candidates - 1],
+            }
+        })
+        .sum();
+    Ok(sample_term_total / n_frames as f64 + log_unit_ball_volume)
+}
+
+/// Every frame needs at least one neighbor outside its Theiler window, which
+/// the middle frames of the series only have when N >= 2w + 2.
+fn validate_theiler_window(n_frames: usize, theiler_window: usize) -> Result<(), String> {
+    if n_frames < 2 * theiler_window + 2 {
+        return Err(format!(
+            "Theiler window {theiler_window} needs at least {} frames, got {n_frames}",
+            2 * theiler_window + 2
+        ));
+    }
+    Ok(())
 }
 
 fn binomial(n: usize, k: usize) -> usize {
@@ -143,13 +182,16 @@ fn combination_from_rank<const K: usize>(mut rank: usize, n: usize) -> [usize; K
 
 /// Optional settings shared by every entropy estimator.
 ///
-/// `EntropyOptions::default()` treats every coordinate as linear and uses the
-/// historical Python-compatible finite-sample constant.
+/// `EntropyOptions::default()` treats every coordinate as linear, uses the
+/// historical Python-compatible finite-sample constant, and has no Theiler window.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EntropyOptions<'a> {
     /// Per-coordinate metrics; `None` treats every coordinate as linear.
     pub metrics: Option<&'a [CoordinateMetric]>,
     pub constant: FiniteSampleConstant,
+    /// Theiler window `w`: a frame's nearest neighbor must be more than `w`
+    /// frames away from it in time. 0 allows every other frame.
+    pub theiler_window: usize,
 }
 
 /// Validates the input and returns the data truncated to `frames_end` together
@@ -189,20 +231,23 @@ pub fn calculate_entropy(
     }
     let (one_d_data, metrics) = resolve_input(one_d_data, frames_end, options)?;
     let constant = options.constant;
+    let theiler_window = options.theiler_window;
 
     let n_frames = one_d_data[0].len();
     let degrees_freedom = one_d_data.len();
-    let one_d_constant = entropy_constant_with_convention(n_frames, 1, constant)?;
-    let two_d_constant = entropy_constant_with_convention(n_frames, 2, constant)?;
-    let three_d_constant = entropy_constant_with_convention(n_frames, 3, constant)?;
-    let four_d_constant = entropy_constant_with_convention(n_frames, 4, constant)?;
+    let one_d_constant = entropy_constant_with_convention(n_frames, 1, constant, theiler_window)?;
+    let two_d_constant = entropy_constant_with_convention(n_frames, 2, constant, theiler_window)?;
+    let three_d_constant = entropy_constant_with_convention(n_frames, 3, constant, theiler_window)?;
+    let four_d_constant = entropy_constant_with_convention(n_frames, 4, constant, theiler_window)?;
 
     let one_d_distances_total: f64 = one_d_data
         .par_iter()
         .zip(metrics.par_iter())
         .try_fold(
             || 0.0,
-            |acc, (ic, metric)| Ok::<f64, String>(acc + calc_joint_nn([ic], [*metric])?),
+            |acc, (ic, metric)| {
+                Ok::<f64, String>(acc + calc_joint_nn_with_window([ic], [*metric], theiler_window)?)
+            },
         )
         .try_reduce(|| 0.0, |a, b| Ok::<f64, String>(a + b))?;
 
@@ -226,9 +271,10 @@ pub fn calculate_entropy(
             |acc, rank| {
                 let [i, j] = combination_from_rank::<2>(rank, degrees_freedom);
                 Ok::<f64, String>(
-                    acc + calc_joint_nn(
+                    acc + calc_joint_nn_with_window(
                         [&one_d_data[i], &one_d_data[j]],
                         [metrics[i], metrics[j]],
+                        theiler_window,
                     )?,
                 )
             },
@@ -254,9 +300,10 @@ pub fn calculate_entropy(
             |acc, rank| {
                 let [i, j, k] = combination_from_rank::<3>(rank, degrees_freedom);
                 Ok::<f64, String>(
-                    acc + calc_joint_nn(
+                    acc + calc_joint_nn_with_window(
                         [&one_d_data[i], &one_d_data[j], &one_d_data[k]],
                         [metrics[i], metrics[j], metrics[k]],
+                        theiler_window,
                     )?,
                 )
             },
@@ -287,7 +334,7 @@ pub fn calculate_entropy(
             |acc, rank| {
                 let [i, j, k, l] = combination_from_rank::<4>(rank, degrees_freedom);
                 Ok::<f64, String>(
-                    acc + calc_joint_nn(
+                    acc + calc_joint_nn_with_window(
                         [
                             &one_d_data[i],
                             &one_d_data[j],
@@ -295,6 +342,7 @@ pub fn calculate_entropy(
                             &one_d_data[l],
                         ],
                         [metrics[i], metrics[j], metrics[k], metrics[l]],
+                        theiler_window,
                     )?,
                 )
             },
@@ -335,7 +383,12 @@ pub fn estimate_coordinate_entropy(
         ));
     }
     let (one_d_data, metrics) = resolve_input(one_d_data, frames_end, options)?;
-    let coordinate_entropies = coordinate_entropy_impl(&one_d_data, &metrics, options.constant)?;
+    let coordinate_entropies = coordinate_entropy_impl(
+        &one_d_data,
+        &metrics,
+        options.constant,
+        options.theiler_window,
+    )?;
     let degrees_freedom = coordinate_entropies.len();
     if mie_order == 1 || degrees_freedom == 1 {
         return Ok(coordinate_entropies);
@@ -345,6 +398,7 @@ pub fn estimate_coordinate_entropy(
         &one_d_data,
         &metrics,
         options.constant,
+        options.theiler_window,
         &coordinate_entropies,
     )?;
     let mut coordinate_mie_entropy = coordinate_entropies;
@@ -365,15 +419,16 @@ fn coordinate_entropy_impl(
     one_d_data: &[Vec<f64>],
     metrics: &[CoordinateMetric],
     constant: FiniteSampleConstant,
+    theiler_window: usize,
 ) -> Result<Vec<f64>, String> {
     let n_frames: usize = one_d_data[0].len();
-    let one_d_constant = entropy_constant_with_convention(n_frames, 1, constant)?;
+    let one_d_constant = entropy_constant_with_convention(n_frames, 1, constant, theiler_window)?;
 
     one_d_data
         .par_iter()
         .zip(metrics.par_iter())
         .map(|(ic, metric)| {
-            calc_joint_nn([ic], [*metric]).map(|distance| {
+            calc_joint_nn_with_window([ic], [*metric], theiler_window).map(|distance| {
                 estimate_entropy_efficient(distance, (n_frames as f64).recip(), one_d_constant)
             })
         })
@@ -387,19 +442,31 @@ pub fn estimate_coordinate_mutual_information(
     options: &EntropyOptions,
 ) -> Result<Vec<f64>, String> {
     let (one_d_data, metrics) = resolve_input(one_d_data, frames_end, options)?;
-    let one_d_entropies = coordinate_entropy_impl(&one_d_data, &metrics, options.constant)?;
-    coordinate_mutual_information_impl(&one_d_data, &metrics, options.constant, &one_d_entropies)
+    let one_d_entropies = coordinate_entropy_impl(
+        &one_d_data,
+        &metrics,
+        options.constant,
+        options.theiler_window,
+    )?;
+    coordinate_mutual_information_impl(
+        &one_d_data,
+        &metrics,
+        options.constant,
+        options.theiler_window,
+        &one_d_entropies,
+    )
 }
 
 fn coordinate_mutual_information_impl(
     one_d_data: &[Vec<f64>],
     metrics: &[CoordinateMetric],
     constant: FiniteSampleConstant,
+    theiler_window: usize,
     one_d_entropies: &[f64],
 ) -> Result<Vec<f64>, String> {
     let n_frames: usize = one_d_data[0].len();
     let degrees_freedom: usize = one_d_data.len();
-    let two_d_constant = entropy_constant_with_convention(n_frames, 2, constant)?;
+    let two_d_constant = entropy_constant_with_convention(n_frames, 2, constant, theiler_window)?;
     let two_d_degrees_freedom = binomial(degrees_freedom, 2);
 
     let mutual_information: Vec<f64> = (0..two_d_degrees_freedom)
@@ -407,7 +474,11 @@ fn coordinate_mutual_information_impl(
         .map(|rank| {
             let [i, j] = combination_from_rank::<2>(rank, degrees_freedom);
             let joint_entropy = estimate_entropy_efficient(
-                calc_joint_nn([&one_d_data[i], &one_d_data[j]], [metrics[i], metrics[j]])? * 2.0,
+                calc_joint_nn_with_window(
+                    [&one_d_data[i], &one_d_data[j]],
+                    [metrics[i], metrics[j]],
+                    theiler_window,
+                )? * 2.0,
                 (n_frames as f64).recip(),
                 two_d_constant,
             );
@@ -452,10 +523,24 @@ fn periodic_query_images<const K: usize>(
 
 /// Sum over frames of ln(distance to the nearest other frame) in the K-dimensional
 /// joint space of `coordinates`, using each coordinate's metric.
-#[allow(clippy::needless_range_loop)]
 pub fn calc_joint_nn<const K: usize>(
     coordinates: [&[f64]; K],
     metrics: [CoordinateMetric; K],
+) -> Result<f64, String> {
+    calc_joint_nn_with_window(coordinates, metrics, 0)
+}
+
+/// `calc_joint_nn` with a Theiler window: frame i's nearest neighbor is taken
+/// only from frames j with |i - j| > `theiler_window`. A window of 0 is
+/// identical to `calc_joint_nn`.
+///
+/// Exact duplicates of a frame's position never count as its neighbor, with or
+/// without a window, so the distance is always to the nearest distinct point.
+#[allow(clippy::needless_range_loop)]
+pub fn calc_joint_nn_with_window<const K: usize>(
+    coordinates: [&[f64]; K],
+    metrics: [CoordinateMetric; K],
+    theiler_window: usize,
 ) -> Result<f64, String> {
     let points_len = coordinates[0].len();
     if points_len < 2 {
@@ -472,6 +557,7 @@ pub fn calc_joint_nn<const K: usize>(
         ));
     }
     validate_metrics(&metrics, K)?;
+    validate_theiler_window(points_len, theiler_window)?;
 
     let mut points: Vec<[f64; K]> = Vec::with_capacity(points_len);
     for frame_idx in 0..points_len {
@@ -488,34 +574,72 @@ pub fn calc_joint_nn<const K: usize>(
         points.push(point);
     }
 
-    let mut unique_points = points.clone();
-    unique_points.sort_by(point_cmp);
-    unique_points.dedup_by(|left, right| point_cmp(left, right).is_eq());
+    // Each distinct position keeps the first and last frame found there, which
+    // is all the Theiler test needs: some frame at a position lies outside the
+    // window around frame i exactly when the first or the last one does.
+    let mut frame_order: Vec<usize> = (0..points_len).collect();
+    frame_order.sort_by(|&left, &right| point_cmp(&points[left], &points[right]));
+    let mut unique_points: Vec<[f64; K]> = Vec::with_capacity(points_len);
+    let mut frame_ranges: Vec<(usize, usize)> = Vec::with_capacity(points_len);
+    let mut unique_index_of_frame = vec![0usize; points_len];
+    for frame in frame_order {
+        let point = points[frame];
+        if unique_points
+            .last()
+            .is_none_or(|last| point_cmp(last, &point).is_ne())
+        {
+            unique_points.push(point);
+            frame_ranges.push((frame, frame));
+        }
+        let range = frame_ranges.last_mut().unwrap();
+        range.0 = range.0.min(frame);
+        range.1 = range.1.max(frame);
+        unique_index_of_frame[frame] = unique_points.len() - 1;
+    }
     if unique_points.len() < 2 {
         return Err(format!(
             "need at least two distinct points for {K}D nearest neighbor"
         ));
     }
 
+    // Only the query's own position and positions whose frames all fall inside
+    // its window are ineligible, at most 2w + 1 of them, so the nearest 2w + 2
+    // positions always contain the nearest eligible one if it exists.
+    let max_query_count = unique_points.len().min(2 * theiler_window + 2);
     let kdtree: ImmutableKdTree<f64, K> = ImmutableKdTree::new_from_slice(&unique_points);
-    let query_count = NonZero::new(unique_points.len().min(2)).unwrap();
     let mut distance_total: f64 = 0.0;
-    for point in points {
-        let self_index = unique_points
-            .binary_search_by(|candidate| point_cmp(candidate, &point))
-            .map_err(|_| "canonical coordinate point was not found".to_string())?;
+    for (frame, point) in points.into_iter().enumerate() {
+        let self_index = unique_index_of_frame[frame];
+        let is_eligible = |candidate: usize| {
+            let (first, last) = frame_ranges[candidate];
+            candidate != self_index
+                && (first + theiler_window < frame || last > frame + theiler_window)
+        };
         let result = periodic_query_images(point, metrics)
             .into_iter()
-            .flat_map(|image| {
-                kdtree
-                    .nearest_n::<SquaredEuclidean>(&image, query_count)
-                    .into_iter()
+            .filter_map(|image| {
+                let mut query_count = max_query_count.min(2);
+                loop {
+                    let neighbors = kdtree.nearest_n::<SquaredEuclidean>(
+                        &image,
+                        NonZero::new(query_count).unwrap(),
+                    );
+                    let nearest_eligible = neighbors
+                        .iter()
+                        .filter(|neighbor| is_eligible(neighbor.item as usize))
+                        .map(|neighbor| neighbor.distance)
+                        .min_by(f64::total_cmp);
+                    if nearest_eligible.is_some() || query_count == max_query_count {
+                        return nearest_eligible;
+                    }
+                    query_count = (query_count * 2).min(max_query_count);
+                }
             })
-            .filter(|neighbor| neighbor.item as usize != self_index)
-            .map(|neighbor| neighbor.distance)
             .min_by(f64::total_cmp)
             .ok_or_else(|| {
-                format!("need at least two distinct points for {K}D nearest neighbor")
+                format!(
+                    "frame {frame} has no distinct {K}D neighbor outside Theiler window {theiler_window}"
+                )
             })?;
         distance_total += result.sqrt().ln();
     }

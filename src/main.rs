@@ -8,7 +8,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W]",
             args[0]
         );
         std::process::exit(1);
@@ -24,6 +24,7 @@ fn main() {
     let mut use_python = false;
     let mut mie_order = 2;
     let mut stride = 1usize;
+    let mut theiler_window = 0usize;
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
@@ -75,6 +76,16 @@ fn main() {
                     .expect("invalid --stride value");
                 i += 2;
             }
+            "--theiler-window" => {
+                if i + 1 >= args.len() {
+                    eprintln!("--theiler-window requires a value");
+                    std::process::exit(1);
+                }
+                theiler_window = args[i + 1]
+                    .parse::<usize>()
+                    .expect("invalid --theiler-window value");
+                i += 2;
+            }
             "--python" => {
                 use_python = true;
                 i += 1;
@@ -105,6 +116,10 @@ fn main() {
         }
         if exact_constant {
             eprintln!("--exact-constant is not supported by the legacy --python mode.");
+            std::process::exit(1);
+        }
+        if theiler_window != 0 {
+            eprintln!("--theiler-window is not supported by the legacy --python mode.");
             std::process::exit(1);
         }
         let script = "/gibbs/helmut/code/python_scripts/NN_entropy_calc_rusty.py";
@@ -186,6 +201,7 @@ fn main() {
     let options = EntropyOptions {
         metrics: Some(&metrics),
         constant,
+        theiler_window,
     };
     let entropy = match calculate_entropy(&one_d_data, used_frames, mie_order, &options) {
         Ok(value) => value,

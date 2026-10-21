@@ -154,6 +154,7 @@ fn test_exact_finite_sample_constant() {
         &EntropyOptions {
             metrics: Some(&[CoordinateMetric::Linear]),
             constant: FiniteSampleConstant::Exact,
+            ..Default::default()
         },
     )
     .unwrap();
@@ -442,6 +443,7 @@ fn coordinate_entropy_exact_constant_matches_closed_form() {
         &EntropyOptions {
             metrics: Some(&[CoordinateMetric::Linear]),
             constant: FiniteSampleConstant::Exact,
+            ..Default::default()
         },
     )
     .expect("exact-constant coordinate entropy failed");
@@ -465,6 +467,7 @@ fn coordinate_entropies_sum_to_first_order_total_under_exact_constant() {
         &EntropyOptions {
             metrics: Some(&metrics),
             constant: FiniteSampleConstant::Exact,
+            ..Default::default()
         },
     )
     .expect("exact-constant coordinate entropy failed");
@@ -475,6 +478,7 @@ fn coordinate_entropies_sum_to_first_order_total_under_exact_constant() {
         &EntropyOptions {
             metrics: Some(&metrics),
             constant: FiniteSampleConstant::Exact,
+            ..Default::default()
         },
     )
     .expect("exact-constant order-1 entropy failed");
@@ -497,6 +501,7 @@ fn mutual_information_convention_shift_equals_sample_term_difference() {
         &EntropyOptions {
             metrics: Some(&metrics),
             constant: FiniteSampleConstant::PythonCompatibleAsymptotic,
+            ..Default::default()
         },
     )
     .expect("asymptotic mutual information failed");
@@ -506,6 +511,7 @@ fn mutual_information_convention_shift_equals_sample_term_difference() {
         &EntropyOptions {
             metrics: Some(&metrics),
             constant: FiniteSampleConstant::Exact,
+            ..Default::default()
         },
     )
     .expect("exact mutual information failed");
@@ -544,6 +550,7 @@ fn coordinate_mie_entropy_sums_to_second_order_total_under_exact_constant() {
         &EntropyOptions {
             metrics: Some(&metrics),
             constant: FiniteSampleConstant::Exact,
+            ..Default::default()
         },
     )
     .expect("exact-constant coordinate MIE entropy failed");
@@ -554,6 +561,7 @@ fn coordinate_mie_entropy_sums_to_second_order_total_under_exact_constant() {
         &EntropyOptions {
             metrics: Some(&metrics),
             constant: FiniteSampleConstant::Exact,
+            ..Default::default()
         },
     )
     .expect("exact-constant order-2 entropy failed");
@@ -581,6 +589,7 @@ fn coordinate_estimators_compose_exact_constant_with_periodic_metrics() {
         &EntropyOptions {
             metrics: Some(&metrics),
             constant: FiniteSampleConstant::Exact,
+            ..Default::default()
         },
     )
     .expect("periodic exact-constant coordinate entropy failed");
@@ -591,6 +600,7 @@ fn coordinate_estimators_compose_exact_constant_with_periodic_metrics() {
         &EntropyOptions {
             metrics: Some(&metrics),
             constant: FiniteSampleConstant::Exact,
+            ..Default::default()
         },
     )
     .expect("periodic exact-constant order-1 entropy failed");
@@ -608,6 +618,7 @@ fn default_options_use_linear_metrics_and_the_python_compatible_constant() {
     let explicit = EntropyOptions {
         metrics: Some(&metrics),
         constant: FiniteSampleConstant::PythonCompatibleAsymptotic,
+        ..Default::default()
     };
 
     for order in 1..=3 {
