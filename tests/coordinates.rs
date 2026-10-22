@@ -491,3 +491,16 @@ fn log_jacobian_needs_the_full_tree_set() {
     let err = torsions.log_jacobian().unwrap_err().to_string();
     assert!(err.contains("torsions only"), "{err}");
 }
+
+#[test]
+fn coordinate_pairs_follow_the_mutual_information_order() {
+    let (top, traj, _) = ethane("pairs");
+    let mut internal = load(&top, &traj, BondSet::HeavyAtom, true, false);
+    internal.coordinate_pairs();
+    let n = internal.dim;
+    let expected: Vec<(usize, usize)> = (0..n)
+        .flat_map(|i| ((i + 1)..n).map(move |j| (i, j)))
+        .collect();
+    assert_eq!(internal.pairs, expected);
+    assert_eq!(internal.pairs.len(), n * (n - 1) / 2);
+}

@@ -10,15 +10,20 @@
 
 mod common;
 
+use std::path::{Path, PathBuf};
+
 use common::Rng;
 use common::amber::{
     CHAIN_ATOMS, CHAIN_BONDS, CHARMM_WATER_ATOMS, CHLORIDE, NetcdfOptions, SODIUM, TIP3P_ATOMS,
     TIP4PEW_ATOMS, TIP4PEW_BONDS, Topology, WATER_BONDS, chain_frames, concat_frames, ion_frames,
-    scratch_path, water_frames, write_netcdf, write_prmtop,
+    scratch_path, water_frames, write_netcdf, write_netcdf_f64, write_prmtop, write_prmtop_with,
 };
 use nn_entropy::CoordinateMetric;
-use nn_entropy::bat_library::InternalCoordinates;
 use nn_entropy::bat_library::geometry::bond_length;
+use nn_entropy::bat_library::geometry::{
+    bond_angle, legacy_bond_angle, legacy_torsion_angle, torsion_angle,
+};
+use nn_entropy::bat_library::{CoordinateOptions, Geometry, InternalCoordinates};
 
 const FRAMES: usize = 12;
 
@@ -428,4 +433,118 @@ fn a_heavy_atom_diatomic_contributes_exactly_its_bond() {
             "frame {f} diatomic bond"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Double-precision trajectories and topologies without atom types
+// ---------------------------------------------------------------------------
+
+/// A chain molecule's topology, and its frames written as f64 and as f32.
+fn chain_in_both_precisions(name: &str) -> (PathBuf, PathBuf, PathBuf, Vec<Vec<[f64; 3]>>) {
+    let mut topology = Topology::default();
+    topology.push_molecule("BUT", &CHAIN_ATOMS, &CHAIN_BONDS);
+    let top = scratch_path(&format!("{name}.parm7"));
+    write_prmtop(&top, &topology);
+    let mut rng = Rng::new(0xd0b1e);
+    let frames = chain_frames(&mut rng, FRAMES, [0.0, 0.0, 0.0]);
+    let double = scratch_path(&format!("{name}_f64.nc"));
+    let single = scratch_path(&format!("{name}_f32.nc"));
+    write_netcdf_f64(&double, &frames, NetcdfOptions::default());
+    write_netcdf(
+        &single,
+        &concat_frames(&[&frames]),
+        NetcdfOptions::default(),
+    );
+    (top, double, single, frames)
+}
+
+fn read(top: &Path, traj: &Path, options: CoordinateOptions) -> InternalCoordinates {
+    let mut internal = InternalCoordinates::with_options(top, options).unwrap();
+    internal
+        .calculate_internal_coords(traj, usize::MAX, false)
+        .unwrap();
+    internal
+}
+
+#[test]
+fn double_precision_trajectories_keep_full_precision() {
+    let (top, double, _, frames) = chain_in_both_precisions("f64_standard");
+    let raw = CoordinateOptions {
+        phase_angles: false,
+        ..Default::default()
+    };
+    let internal = read(&top, &double, raw);
+    assert_eq!(internal.int_coords.len(), FRAMES);
+    for (positions, values) in frames.iter().zip(&internal.int_coords) {
+        for (atoms, &value) in internal.coordinate_atoms().iter().zip(values) {
+            let p = |k: usize| positions[atoms[k]];
+            let expected = match atoms.len() {
+                2 => bond_length(p(0), p(1)),
+                3 => bond_angle(p(0), p(1), p(2)),
+                _ => torsion_angle(p(0), p(1), p(2), p(3)),
+            };
+            assert_eq!(value, expected, "coordinate {atoms:?}");
+        }
+    }
+}
+
+#[test]
+fn double_precision_trajectories_use_the_legacy_formulas_in_legacy_mode() {
+    let (top, double, _, frames) = chain_in_both_precisions("f64_legacy");
+    let legacy = CoordinateOptions {
+        phase_angles: false,
+        geometry: Geometry::Legacy,
+        ..Default::default()
+    };
+    let internal = read(&top, &double, legacy);
+    for (positions, values) in frames.iter().zip(&internal.int_coords) {
+        for (atoms, &value) in internal.coordinate_atoms().iter().zip(values) {
+            let p = |k: usize| positions[atoms[k]];
+            let expected = match atoms.len() {
+                2 => bond_length(p(0), p(1)),
+                3 => legacy_bond_angle(p(0), p(1), p(2)),
+                _ => legacy_torsion_angle(p(0), p(1), p(2), p(3)),
+            };
+            assert_eq!(value, expected, "coordinate {atoms:?}");
+        }
+    }
+}
+
+#[test]
+fn single_and_double_precision_copies_agree_to_single_precision() {
+    let (top, double, single, _) = chain_in_both_precisions("f64_vs_f32");
+    // Phase angles, the defaults, on both.
+    let (d, s) = (
+        read(&top, &double, Default::default()),
+        read(&top, &single, Default::default()),
+    );
+    assert_eq!(d.coordinate_atoms(), s.coordinate_atoms());
+    for (a, b) in d.int_coords.iter().zip(&s.int_coords) {
+        for (x, y) in a.iter().zip(b) {
+            assert!((x - y).abs() < 1e-5, "{x} vs {y}");
+        }
+    }
+}
+
+#[test]
+fn atom_names_stand_in_for_missing_atom_types() {
+    // Without AMBER_ATOM_TYPE the reader classifies atoms by ATOM_NAME. The
+    // chain's names (H1, C1, ...) identify the same hydrogens as its types.
+    let mut topology = Topology::default();
+    topology.push_molecule("BUT", &CHAIN_ATOMS, &CHAIN_BONDS);
+    let with_types = scratch_path("names_with_types.parm7");
+    let without_types = scratch_path("names_without_types.parm7");
+    write_prmtop_with(&with_types, &topology, true);
+    write_prmtop_with(&without_types, &topology, false);
+    let traj = scratch_path("names.nc");
+    let mut rng = Rng::new(0xa70e);
+    let frames = chain_frames(&mut rng, FRAMES, [0.0, 0.0, 0.0]);
+    write_netcdf(&traj, &concat_frames(&[&frames]), NetcdfOptions::default());
+
+    let (a, b) = (
+        read(&with_types, &traj, Default::default()),
+        read(&without_types, &traj, Default::default()),
+    );
+    assert_eq!(a.coordinate_atoms(), b.coordinate_atoms());
+    assert_eq!(a.int_coords, b.int_coords);
 }

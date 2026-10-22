@@ -19,14 +19,29 @@ enum Estimator {
     BoltzmannQuasiHarmonic,
 }
 
+/// Prints `message` and exits with status 1.
+fn fail(message: impl std::fmt::Display) -> ! {
+    eprintln!("{message}");
+    std::process::exit(1);
+}
+
+/// The value after the flag `args[i]`, parsed as `T`.
+fn flag_value<T: std::str::FromStr>(args: &[String], i: usize) -> T {
+    let flag = &args[i];
+    let Some(raw) = args.get(i + 1) else {
+        fail(format!("{flag} requires a value"));
+    };
+    raw.parse()
+        .unwrap_or_else(|_| fail(format!("invalid {flag} value: {raw}")))
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
-        eprintln!(
+        fail(format!(
             "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate]",
             args[0]
-        );
-        std::process::exit(1);
+        ));
     }
     let top_path = Path::new(&args[1]);
     let traj_path = Path::new(&args[2]);
@@ -80,49 +95,23 @@ fn main() {
                 i += 1;
             }
             "--start" => {
-                if i + 1 >= args.len() {
-                    eprintln!("--start requires a value");
-                    std::process::exit(1);
-                }
-                start = Some(args[i + 1].parse::<usize>().expect("invalid --start value"));
+                start = Some(flag_value(&args, i));
                 i += 2;
             }
             "--stop" => {
-                if i + 1 >= args.len() {
-                    eprintln!("--stop requires a value");
-                    std::process::exit(1);
-                }
-                stop = Some(args[i + 1].parse::<usize>().expect("invalid --stop value"));
+                stop = Some(flag_value(&args, i));
                 i += 2;
             }
             "--mie-order" => {
-                if i + 1 >= args.len() {
-                    eprintln!("--mie-order requires a value");
-                    std::process::exit(1);
-                }
-                mie_order = args[i + 1]
-                    .parse::<usize>()
-                    .expect("invalid --mie-order value");
+                mie_order = flag_value(&args, i);
                 i += 2;
             }
             "--stride" => {
-                if i + 1 >= args.len() {
-                    eprintln!("--stride requires a value");
-                    std::process::exit(1);
-                }
-                stride = args[i + 1]
-                    .parse::<usize>()
-                    .expect("invalid --stride value");
+                stride = flag_value(&args, i);
                 i += 2;
             }
             "--theiler-window" => {
-                if i + 1 >= args.len() {
-                    eprintln!("--theiler-window requires a value");
-                    std::process::exit(1);
-                }
-                theiler_window = args[i + 1]
-                    .parse::<usize>()
-                    .expect("invalid --theiler-window value");
+                theiler_window = flag_value(&args, i);
                 i += 2;
             }
             "--legacy" => {
@@ -131,16 +120,14 @@ fn main() {
             }
             "--estimator" => {
                 if i + 1 >= args.len() {
-                    eprintln!("--estimator requires a value");
-                    std::process::exit(1);
+                    fail("--estimator requires a value");
                 }
                 estimator = match args[i + 1].as_str() {
                     "nn" => Estimator::NearestNeighbor,
                     "qh" => Estimator::QuasiHarmonic,
                     "bqh" => Estimator::BoltzmannQuasiHarmonic,
                     other => {
-                        eprintln!("--estimator must be nn, qh or bqh, got {other}");
-                        std::process::exit(1);
+                        fail(format!("--estimator must be nn, qh or bqh, got {other}"));
                     }
                 };
                 i += 2;
@@ -151,71 +138,52 @@ fn main() {
             }
             "--periodic-correlation" => {
                 if i + 1 >= args.len() {
-                    eprintln!("--periodic-correlation requires a value");
-                    std::process::exit(1);
+                    fail("--periodic-correlation requires a value");
                 }
                 periodic_correlation = Some(match args[i + 1].as_str() {
                     "complex" => PeriodicCorrelation::Complex,
                     "centered" => PeriodicCorrelation::Centered,
                     other => {
-                        eprintln!(
+                        fail(format!(
                             "--periodic-correlation must be complex or centered, got {other}"
-                        );
-                        std::process::exit(1);
+                        ));
                     }
                 });
                 i += 2;
             }
             "--histogram-bins" => {
-                if i + 1 >= args.len() {
-                    eprintln!("--histogram-bins requires a value");
-                    std::process::exit(1);
-                }
-                histogram_bins = Some(
-                    args[i + 1]
-                        .parse::<usize>()
-                        .expect("invalid --histogram-bins value"),
-                );
+                histogram_bins = Some(flag_value(&args, i));
                 i += 2;
             }
             other => {
-                eprintln!("Unknown argument: {other}");
-                std::process::exit(1);
+                fail(format!("Unknown argument: {other}"));
             }
         }
     }
     if !(1..=4).contains(&mie_order) {
-        eprintln!("--mie-order must be 1, 2, 3, or 4");
-        std::process::exit(1);
+        fail("--mie-order must be 1, 2, 3, or 4");
     }
     if stride == 0 {
-        eprintln!("--stride must be at least 1");
-        std::process::exit(1);
+        fail("--stride must be at least 1");
     }
     if jacobian && (!tree_bonds || torsions_only) {
-        eprintln!("--jacobian requires --tree-bonds and cannot be combined with --torsions-only");
-        std::process::exit(1);
+        fail("--jacobian requires --tree-bonds and cannot be combined with --torsions-only");
     }
 
     if estimator != Estimator::NearestNeighbor && mie_order != 2 {
-        eprintln!("--mie-order applies only to --estimator nn");
-        std::process::exit(1);
+        fail("--mie-order applies only to --estimator nn");
     }
     if histogram_bins.is_some() && estimator != Estimator::BoltzmannQuasiHarmonic {
-        eprintln!("--histogram-bins applies only to --estimator bqh");
-        std::process::exit(1);
+        fail("--histogram-bins applies only to --estimator bqh");
     }
     if periodic_correlation.is_some() && estimator == Estimator::NearestNeighbor {
-        eprintln!("--periodic-correlation applies only to --estimator qh or bqh");
-        std::process::exit(1);
+        fail("--periodic-correlation applies only to --estimator qh or bqh");
     }
     if per_coordinate && estimator == Estimator::NearestNeighbor && mie_order > 2 {
-        eprintln!("--per-coordinate supports --mie-order 1 or 2");
-        std::process::exit(1);
+        fail("--per-coordinate supports --mie-order 1 or 2");
     }
     if histogram_bins == Some(0) {
-        eprintln!("--histogram-bins must be at least 1");
-        std::process::exit(1);
+        fail("--histogram-bins must be at least 1");
     }
     if legacy {
         // The original Python estimator had none of these; each would make the
@@ -235,8 +203,7 @@ fn main() {
         ];
         for (given, flag) in conflicts {
             if given {
-                eprintln!("{flag} cannot be combined with --legacy");
-                std::process::exit(1);
+                fail(format!("{flag} cannot be combined with --legacy"));
             }
         }
     }
@@ -256,20 +223,28 @@ fn main() {
         },
     };
     let mut internal = InternalCoordinates::with_options(top_path, coordinate_options)
-        .expect("failed to build BAT list from topology");
+        .unwrap_or_else(|err| {
+            fail(format!(
+                "Cannot read topology {}: {err}",
+                top_path.display()
+            ))
+        });
     internal
         .calculate_internal_coords(traj_path, stop.unwrap_or(usize::MAX), torsions_only)
-        .expect("failed to read trajectory or compute BAT coordinates");
+        .unwrap_or_else(|err| {
+            fail(format!(
+                "Cannot read trajectory {}: {err}",
+                traj_path.display()
+            ))
+        });
 
     let frames = internal.int_coords.len();
     if frames == 0 {
-        eprintln!("No frames read from trajectory.");
-        std::process::exit(1);
+        fail("No frames read from trajectory.");
     }
     let start = start.unwrap_or(0);
     if start >= frames {
-        eprintln!("--start is beyond available frames.");
-        std::process::exit(1);
+        fail("--start is beyond available frames.");
     }
     let dim = internal
         .int_coords
@@ -277,8 +252,7 @@ fn main() {
         .map(|row| row.len())
         .unwrap_or(0);
     if dim == 0 {
-        eprintln!("No internal coordinates were generated.");
-        std::process::exit(1);
+        fail("No internal coordinates were generated.");
     }
 
     let metrics = if no_periodic {
@@ -290,8 +264,7 @@ fn main() {
     let mut one_d_data: Vec<Vec<f64>> = vec![Vec::with_capacity(selected_frames); dim];
     for frame in internal.int_coords.iter().skip(start).step_by(stride) {
         if frame.len() != dim {
-            eprintln!("Inconsistent internal coordinate dimensions.");
-            std::process::exit(1);
+            fail("Inconsistent internal coordinate dimensions.");
         }
         for (i, value) in frame.iter().enumerate() {
             one_d_data[i].push(*value);
@@ -333,8 +306,7 @@ fn main() {
     let entropy = match result {
         Ok(value) => value,
         Err(err) => {
-            eprintln!("Entropy calculation failed: {err}");
-            std::process::exit(1);
+            fail(format!("Entropy calculation failed: {err}"));
         }
     };
     if per_coordinate {
@@ -360,8 +332,7 @@ fn main() {
         let values = match values {
             Ok(values) => values,
             Err(err) => {
-                eprintln!("Per-coordinate entropy calculation failed: {err}");
-                std::process::exit(1);
+                fail(format!("Per-coordinate entropy calculation failed: {err}"));
             }
         };
         let references = internal.phase_references();

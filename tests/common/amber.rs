@@ -218,6 +218,12 @@ fn write_text_section(out: &mut String, flag: &str, values: &[&str]) {
 
 /// Write a minimal prmtop containing the sections the reader consumes.
 pub fn write_prmtop(path: &Path, topology: &Topology) {
+    write_prmtop_with(path, topology, true);
+}
+
+/// `write_prmtop`, optionally without the AMBER_ATOM_TYPE section, as some
+/// non-Amber tools write topologies; readers then fall back on ATOM_NAME.
+pub fn write_prmtop_with(path: &Path, topology: &Topology, atom_types: bool) {
     let natom = topology.atoms.len();
     let is_hydrogen = |i: usize| topology.atoms[i].atomic_number == 1;
     let with_h: Vec<(usize, usize)> = topology
@@ -303,8 +309,10 @@ pub fn write_prmtop(path: &Path, topology: &Topology) {
         10,
         &int_tokens(&bond_tokens(&without_h)),
     );
-    let types: Vec<&str> = topology.atoms.iter().map(|a| a.amber_type).collect();
-    write_text_section(&mut out, "AMBER_ATOM_TYPE", &types);
+    if atom_types {
+        let types: Vec<&str> = topology.atoms.iter().map(|a| a.amber_type).collect();
+        write_text_section(&mut out, "AMBER_ATOM_TYPE", &types);
+    }
 
     File::create(path)
         .unwrap()
@@ -333,6 +341,7 @@ impl Default for NetcdfOptions {
 
 const NC_CHAR: u32 = 2;
 const NC_FLOAT: u32 = 5;
+const NC_DOUBLE: u32 = 6;
 const NC_DIMENSION: u32 = 10;
 const NC_VARIABLE: u32 = 11;
 const NC_ATTRIBUTE: u32 = 12;
@@ -373,7 +382,14 @@ fn put_text_attributes(buf: &mut Vec<u8>, attributes: &[(&str, &str)]) {
     }
 }
 
-fn netcdf_header(atoms: usize, numrecs: u32, options: NetcdfOptions, begins: [u32; 2]) -> Vec<u8> {
+/// `coordinate_type` is NC_FLOAT or NC_DOUBLE, of `coordinate_bytes` bytes.
+fn netcdf_header(
+    atoms: usize,
+    numrecs: u32,
+    options: NetcdfOptions,
+    begins: [u32; 2],
+    (coordinate_type, coordinate_bytes): (u32, usize),
+) -> Vec<u8> {
     let mut h = Vec::new();
     h.extend_from_slice(b"CDF\x01");
     put_u32(&mut h, numrecs);
@@ -416,14 +432,34 @@ fn netcdf_header(atoms: usize, numrecs: u32, options: NetcdfOptions, begins: [u3
     put_u32(&mut h, 2); // atom
     put_u32(&mut h, 1); // spatial
     put_text_attributes(&mut h, &[("units", "angstrom")]);
-    put_u32(&mut h, NC_FLOAT);
-    put_u32(&mut h, (atoms * 12) as u32);
+    put_u32(&mut h, coordinate_type);
+    put_u32(&mut h, (atoms * 3 * coordinate_bytes) as u32);
     put_u32(&mut h, begins[1]);
     h
 }
 
 /// Write a CDF-1 Amber-style trajectory of f32 coordinates.
 pub fn write_netcdf(path: &Path, frames: &[Vec<[f32; 3]>], options: NetcdfOptions) {
+    write_netcdf_records(path, frames, options, (NC_FLOAT, 4), |out, value| {
+        out.extend_from_slice(&value.to_be_bytes())
+    });
+}
+
+/// Write a CDF-1 Amber-style trajectory of f64 coordinates, as some tools
+/// other than Amber do.
+pub fn write_netcdf_f64(path: &Path, frames: &[Vec<[f64; 3]>], options: NetcdfOptions) {
+    write_netcdf_records(path, frames, options, (NC_DOUBLE, 8), |out, value| {
+        out.extend_from_slice(&value.to_be_bytes())
+    });
+}
+
+fn write_netcdf_records<T: Copy>(
+    path: &Path,
+    frames: &[Vec<[T; 3]>],
+    options: NetcdfOptions,
+    coordinates: (u32, usize),
+    put: impl Fn(&mut Vec<u8>, T),
+) {
     let atoms = frames[0].len();
     let numrecs = if options.streaming {
         u32::MAX
@@ -432,15 +468,21 @@ pub fn write_netcdf(path: &Path, frames: &[Vec<[f32; 3]>], options: NetcdfOption
     };
     // The header length does not depend on the begin offsets (fixed-width
     // fields), so size it once with placeholders.
-    let header_len = netcdf_header(atoms, numrecs, options, [0, 0]).len() as u32;
-    let mut out = netcdf_header(atoms, numrecs, options, [header_len, header_len + 4]);
+    let header_len = netcdf_header(atoms, numrecs, options, [0, 0], coordinates).len() as u32;
+    let mut out = netcdf_header(
+        atoms,
+        numrecs,
+        options,
+        [header_len, header_len + 4],
+        coordinates,
+    );
 
     for (index, frame) in frames.iter().enumerate() {
         assert_eq!(frame.len(), atoms);
         out.extend_from_slice(&(index as f32).to_be_bytes());
         for p in frame {
-            for v in p {
-                out.extend_from_slice(&v.to_be_bytes());
+            for &v in p {
+                put(&mut out, v);
             }
         }
     }

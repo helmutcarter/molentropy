@@ -1,5 +1,13 @@
+mod common;
+
 use std::path::PathBuf;
 use std::process::Command;
+
+use common::Rng;
+use common::amber::{
+    CHLORIDE, NetcdfOptions, SODIUM, Topology, concat_frames, ion_frames, scratch_path,
+    write_netcdf, write_prmtop,
+};
 
 use nn_entropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
 use nn_entropy::{CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy};
@@ -289,4 +297,111 @@ fn phase_angles_are_the_default() {
     )
     .unwrap();
     assert!((parse_entropy(&raw.stdout) - expected).abs() < 1e-12);
+}
+
+/// Runs the CLI with exactly `args` and checks that it fails cleanly: exit
+/// status 1, `message` on stderr, and no panic.
+fn assert_fails(args: &[&str], message: &str) {
+    let output = Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+        .args(args)
+        .output()
+        .expect("failed to run CLI");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{args:?}: {stderr}");
+    assert!(
+        stderr.contains(message),
+        "{args:?}: expected {message:?}, got {stderr}"
+    );
+    assert!(!stderr.contains("panicked"), "{args:?} panicked: {stderr}");
+}
+
+#[test]
+fn argument_errors_are_reported_without_panicking() {
+    let top = fixture("tests/fixtures/test.parm7");
+    let traj = fixture("tests/fixtures/test.nc");
+    let (top, traj) = (top.to_str().unwrap(), traj.to_str().unwrap());
+
+    assert_fails(&[], "Usage:");
+    assert_fails(&[top], "Usage:");
+    for flag in [
+        "--start",
+        "--stop",
+        "--mie-order",
+        "--stride",
+        "--theiler-window",
+        "--histogram-bins",
+        "--estimator",
+        "--periodic-correlation",
+    ] {
+        assert_fails(&[top, traj, flag], &format!("{flag} requires a value"));
+    }
+    for (flag, value) in [
+        ("--start", "q"),
+        ("--stop", "abc"),
+        ("--mie-order", "two"),
+        ("--stride", "-1"),
+        ("--theiler-window", "1.5"),
+        ("--histogram-bins", "z"),
+    ] {
+        assert_fails(
+            &[top, traj, flag, value],
+            &format!("invalid {flag} value: {value}"),
+        );
+    }
+    for (args, message) in [
+        (
+            &["--mie-order", "5"][..],
+            "--mie-order must be 1, 2, 3, or 4",
+        ),
+        (&["--stride", "0"][..], "--stride must be at least 1"),
+        (&["--start", "5"][..], "--start is beyond available frames"),
+        (&["--stop", "0"][..], "No frames read from trajectory"),
+        (&["--bogus"][..], "Unknown argument: --bogus"),
+    ] {
+        let mut full = vec![top, traj];
+        full.extend_from_slice(args);
+        assert_fails(&full, message);
+    }
+}
+
+#[test]
+fn unreadable_inputs_are_reported_without_panicking() {
+    let top = fixture("tests/fixtures/test.parm7");
+    let traj = fixture("tests/fixtures/test.nc");
+    assert_fails(
+        &["/nonexistent/system.parm7", traj.to_str().unwrap()],
+        "Cannot read topology /nonexistent/system.parm7",
+    );
+    assert_fails(
+        &[top.to_str().unwrap(), "/nonexistent/trajectory.nc"],
+        "Cannot read trajectory /nonexistent/trajectory.nc",
+    );
+    // A topology is not a trajectory.
+    assert_fails(
+        &[top.to_str().unwrap(), top.to_str().unwrap()],
+        "Cannot read trajectory",
+    );
+}
+
+#[test]
+fn a_system_without_internal_coordinates_is_reported() {
+    // Two monatomic ions have no bonds, angles or torsions.
+    let mut topology = Topology::default();
+    topology.push_molecule("NA", &SODIUM, &[]);
+    topology.push_molecule("CL", &CHLORIDE, &[]);
+    let top = scratch_path("cli_ions.parm7");
+    let traj = scratch_path("cli_ions.nc");
+    write_prmtop(&top, &topology);
+    let mut rng = Rng::new(5);
+    let sodium = ion_frames(&mut rng, 4, [0.0, 0.0, 0.0]);
+    let chloride = ion_frames(&mut rng, 4, [3.0, 0.0, 0.0]);
+    write_netcdf(
+        &traj,
+        &concat_frames(&[&sodium, &chloride]),
+        NetcdfOptions::default(),
+    );
+    assert_fails(
+        &[top.to_str().unwrap(), traj.to_str().unwrap()],
+        "No internal coordinates were generated",
+    );
 }

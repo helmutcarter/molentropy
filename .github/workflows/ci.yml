@@ -68,6 +68,37 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  # Report only: no threshold fails the build. The Python bindings are
+  # excluded because only the wheel's smoke test reaches them.
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Measure coverage
+        run: |
+          cargo llvm-cov --release --locked --no-fail-fast --summary-only \
+            --ignore-filename-regex 'pyo3_api\.rs' | tee coverage.txt
+          {
+            echo '## Test coverage (Python bindings excluded)'
+            echo '```'
+            grep -E '^(Filename|-|TOTAL)|\.rs ' coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Keep in sync with rust-version in Cargo.toml.
   msrv:
     name: Minimum Rust version
