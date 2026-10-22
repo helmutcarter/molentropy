@@ -2,6 +2,7 @@
 name = "nn_entropy"
 version = "0.2.0"
 edition = "2024"
+rust-version = "1.94"
 
 [lib]
 name = "nn_entropy"

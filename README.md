@@ -13,7 +13,7 @@ This crate provides non-parametric entropy estimation using the nearest-neighbor
 - Entropy calculations parallelized with `rayon`.
 
 ## Requirements
-- Rust toolchain (edition 2024).
+- Rust 1.94 or newer.
 - For Python bindings: a Python environment with build tooling for `pyo3` (see below).
 
 ## Build
@@ -199,7 +199,8 @@ python tests/python_smoke.py
 
 CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy -D warnings`
 and `cargo test` on every push and pull request, plus the wheel build and smoke
-test on Python 3.10 and 3.12.
+test on Python 3.10 and 3.12. A separate job checks that the crate still builds
+on the minimum supported Rust version, 1.94 (`rust-version` in `Cargo.toml`).
 
 ## Project layout
 - `src/lib.rs`: entropy estimators, the MIE, and the nearest-neighbor search.

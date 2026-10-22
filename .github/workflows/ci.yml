@@ -41,6 +41,23 @@ jobs:
       - name: Tests
         run: cargo test --locked --no-fail-fast
 
+  # Keep in sync with rust-version in Cargo.toml.
+  msrv:
+    name: Minimum Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check
+        run: cargo check --all-targets --locked
+
   python:
     name: Python extension
     runs-on: ubuntu-latest
