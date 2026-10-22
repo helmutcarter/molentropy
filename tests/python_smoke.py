@@ -30,6 +30,7 @@ EXPECTED_EXPORTS = {
     "estimate_entropy",
     "estimate_coordinate_entropy",
     "estimate_coordinate_mutual_information",
+    "estimate_quasi_harmonic_entropy",
 }
 
 
@@ -200,6 +201,58 @@ def check_coordinate_options():
     )
 
 
+def check_quasi_harmonic():
+    """QH is the Gaussian entropy of the sample covariance, computed here with numpy."""
+    rng = np.random.default_rng(7)
+    x = rng.normal(size=2000)
+    y = 0.6 * x + rng.normal(size=2000)
+    data = np.array([x, y])
+    got = nn_entropy.estimate_quasi_harmonic_entropy(data)
+    sigma = np.cov(data, bias=True)
+    want = math.log(2 * math.pi * math.e) + 0.5 * math.log(np.linalg.det(sigma))
+    assert abs(got["quasi_harmonic"] - want) < 1e-10, (got, want)
+    r = sigma[0, 1] / math.sqrt(sigma[0, 0] * sigma[1, 1])
+    assert abs(got["correlation"] - 0.5 * math.log(1 - r * r)) < 1e-10, got
+    assert got["boltzmann_quasi_harmonic"] == got["first_order_boltzmann"] + got["correlation"]
+
+    histogram = nn_entropy.estimate_quasi_harmonic_entropy(data, histogram_bins=50)
+    assert histogram["quasi_harmonic"] == got["quasi_harmonic"]
+    assert histogram["first_order_boltzmann"] != got["first_order_boltzmann"]
+
+    # A rotor pair: e^(i phi) captures the 120 degree offset, centering does not.
+    phi = rng.uniform(-math.pi, math.pi, size=5000)
+    psi = np.angle(np.exp(1j * (phi + 2 * math.pi / 3 + 0.2 * rng.normal(size=5000))))
+    rotor = np.array([phi, psi])
+    periods = [2 * math.pi, 2 * math.pi]
+    complex_ = nn_entropy.estimate_quasi_harmonic_entropy(rotor, periods=periods)
+    centered = nn_entropy.estimate_quasi_harmonic_entropy(
+        rotor, periods=periods, periodic_correlation="centered"
+    )
+    dz = [np.exp(1j * a) - np.exp(1j * a).mean() for a in (phi, psi)]
+    rho = (dz[0] * dz[1].conj()).mean() / math.sqrt(
+        (abs(dz[0]) ** 2).mean() * (abs(dz[1]) ** 2).mean()
+    )
+    assert abs(complex_["correlation"] - 0.5 * math.log(1 - abs(rho) ** 2)) < 1e-10, complex_
+    assert centered["correlation"] > complex_["correlation"] + 0.5, (centered, complex_)
+    try:
+        nn_entropy.estimate_quasi_harmonic_entropy(rotor, periods=periods, periodic_correlation="polar")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("an unknown periodic_correlation should raise ValueError")
+
+    # The fixture has 5 frames and 29 coordinates: too few for a correlation matrix.
+    fixtures = Path(__file__).resolve().parent / "fixtures"
+    system = nn_entropy.load_system(str(fixtures / "test.parm7"), str(fixtures / "test.nc"))
+    try:
+        system.estimate_quasi_harmonic_entropy()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("5 frames of 29 coordinates should be rejected")
+    print(f"quasi-harmonic: QH {got['quasi_harmonic']!r}, BQH {got['boltzmann_quasi_harmonic']!r}")
+
+
 def main():
     for check in (
         check_exports,
@@ -212,6 +265,7 @@ def main():
         check_periodic_metric_accepted,
         check_invalid_period_is_rejected,
         check_coordinate_options,
+        check_quasi_harmonic,
     ):
         check()
     print("\nall smoke checks passed")

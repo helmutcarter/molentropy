@@ -6,6 +6,7 @@ use std::num::NonZero;
 pub mod bat_library;
 pub mod legacy;
 pub mod pyo3_api;
+pub mod quasi_harmonic;
 
 /// Metric used for one internal-coordinate dimension.
 #[derive(Debug, Clone, Copy, PartialEq)]

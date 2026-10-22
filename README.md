@@ -25,7 +25,7 @@ cargo build --release
 ## CLI usage
 
 ```bash
-cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--phase-angles] [--jacobian] [--legacy]
+cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered]
 ```
 
 Example:
@@ -46,6 +46,9 @@ Notes:
 - `--phase-angles` replaces each torsion that shares its central bond with an earlier torsion by its offset from that torsion. See [Coordinate sets](#coordinate-sets).
 - `--jacobian` also prints `Mean ln J = ...`, the mean of the log BAT Jacobian over the frames used, on the line before the entropy. It requires `--tree-bonds` and cannot be combined with `--torsions-only`.
 - `--legacy` reproduces the original Python implementation bit for bit. See [Legacy mode](#legacy-mode).
+- `--estimator` chooses the estimator: `nn` (the default) is the nearest-neighbor MIE, `qh` is quasi-harmonic, and `bqh` is Boltzmann quasi-harmonic. See [Quasi-harmonic estimators](#quasi-harmonic-estimators). `--mie-order` applies only to `nn`.
+- `--histogram-bins N` makes `bqh` estimate each coordinate's first-order entropy from an N-bin histogram instead of nearest neighbors.
+- `--periodic-correlation complex|centered` sets how torsions enter the quasi-harmonic correlation term; `complex`, the default, is Harpole and Sharp's `e^{iφ}`. See [Quasi-harmonic estimators](#quasi-harmonic-estimators).
 
 ## Coordinate sets
 
@@ -56,6 +59,31 @@ By default, file-based calculations use every bond between two heavy atoms (ring
 **Phase angles** (`--phase-angles`, `phase_angles=True`, `CoordinateOptions::phase_angles`) group the torsions by central bond. The first torsion about each bond, in coordinate order, keeps its value. Every later torsion about that bond is replaced by its offset from the first one, wrapped to (-π, π]. The offset is still a 2π-periodic coordinate. Because the map is a shear with unit Jacobian, the joint entropy of the full coordinate set is unchanged. A truncated MIE is not invariant, though. The raw torsions of atoms that rotate together, such as the three hydrogens of a methyl group, are strongly correlated, and a second-order expansion misses part of that correlation. Their offsets are stiff and nearly independent of the reference torsion, so less correlation is left beyond second order. Phase angles work with either bond set and with `--torsions-only`.
 
 **The BAT Jacobian** (`--jacobian`, `System.mean_log_jacobian`, `InternalCoordinates::log_jacobian`) is ln J = Σ 2 ln b + Σ ln sin θ over the tree's bonds and angles. Adding its mean to the BAT entropy gives the entropy of the internal motion measured in Cartesian coordinates. Bond lengths are in the trajectory's units (Å for Amber), so ln J depends on that choice, just as the bond-length entropies do. Phase angles do not change it.
+
+## Quasi-harmonic estimators
+
+Both quasi-harmonic estimators describe correlations with the correlation matrix C of the coordinates, `C_ij = σ_ij / √(σ_ii σ_jj)`, which contributes `½ ln|C| ≤ 0`. They differ in the first-order term:
+
+- **QH** (`--estimator qh`, Karplus and Kushick 1981) fits a Gaussian to each coordinate: `S = Σ ½ ln(2πe σ_ii) + ½ ln|C|`, which is `½ ln((2πe)^n |σ|)` when no coordinate is periodic.
+- **BQH** (`--estimator bqh`, Harpole and Sharp, *J. Phys. Chem. B* 2011) keeps the correlation term but takes each coordinate's first-order entropy, `-∫ p ln p`, from its actual distribution, so multimodal coordinates are not treated as one wide well.
+
+The BQH first-order term uses the one-dimensional nearest-neighbor estimate by default, the same first-order term as the MIE, so BQH and the NN MIE differ only in how they treat correlations; `--exact-constant` and `--theiler-window` apply to it. `--histogram-bins N` uses N equal bins instead: linear coordinates are binned over their observed range, periodic ones over a full period. The histogram gives the differential entropy `-Σ p_k ln(p_k / Δ)`, Harpole and Sharp's eq 9, comparable with the other estimators. Some later BQH work reports the discrete `-Σ p_k ln p_k`, which is this value minus `ln Δ` per coordinate, a difference that cancels in entropy changes computed with the same bins. Harpole and Sharp choose bins by width (3-5° for angles, 0.1 Å for lengths) rather than by count. All values are differential entropies in k_B, like the nearest-neighbor results.
+
+The covariance is the population covariance over the selected frames, so there must be more frames than coordinates, and no coordinate can be a linear combination of others.
+
+**Torsions.** By default (`--periodic-correlation complex`), each periodic coordinate enters the correlation matrix as `z = e^{iφ}` (for period P, `e^{2πiq/P}`), following Harpole and Sharp, which makes C Hermitian; `C_ij = ⟨δa_i δa_j*⟩ / √(⟨|δa_i|²⟩⟨|δa_j|²⟩)` with `δa = a - ⟨a⟩`, and linear coordinates stay real. This captures correlations on the circle whatever the angles' spread, such as the fixed 120° offsets between the three hydrogen torsions of a rotating methyl group. The first-order Gaussian term of QH uses each torsion's variance after rotating its circular mean to 0 and wrapping to (-π, π].
+
+`--periodic-correlation centered` puts the centered and wrapped torsions into C as real coordinates instead. That is adequate for torsions confined to one narrow well, where both treatments agree, but a correlation between torsions that sweep the circle looks like a weak sawtooth after wrapping and is largely missed.
+
+On the butane 0.0 end state (10,000 frames), for comparison:
+
+| | NN MIE-2 | QH | BQH |
+|---|---|---|---|
+| complex (default) | -23.9 | -3.9 | -5.7 |
+| centered | -23.9 | +5.2 | +3.3 |
+| complex, `--phase-angles` | -12.4 | -9.2 | -9.7 |
+
+The quasi-harmonic correlation term is a Gaussian approximation and is not invariant under a change of coordinates such as `--phase-angles`, so the estimators need not agree, and none of these numbers is a reference value.
 
 ## Legacy mode
 
@@ -114,6 +142,21 @@ let log_jacobian = internal.log_jacobian()?;   // per frame; tree bonds only
 
 `internal.int_coords` holds the values with shape `[n_frames][n_coords]`.
 
+The quasi-harmonic estimators take the same data and options:
+
+```rust
+use nn_entropy::quasi_harmonic::{
+    MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions, estimate_quasi_harmonic_entropy,
+};
+
+let quasi_harmonic = QuasiHarmonicOptions::default(); // NN marginals, complex torsions
+// or QuasiHarmonicOptions { marginals: MarginalEstimator::Histogram { bins: 100 }, periodic: PeriodicCorrelation::Centered }
+let entropy = estimate_quasi_harmonic_entropy(&one_d_data, frames_end, &quasi_harmonic, &options)?;
+println!("QH {} BQH {}", entropy.quasi_harmonic, entropy.boltzmann_quasi_harmonic);
+```
+
+The result also carries the terms the totals are built from: `first_order_gaussian`, `first_order_boltzmann` and `correlation`.
+
 ## Python bindings
 
 The crate exposes a `nn_entropy` Python module (built from `src/pyo3_api.rs`) with:
@@ -121,7 +164,8 @@ The crate exposes a `nn_entropy` Python module (built from `src/pyo3_api.rs`) wi
 - `estimate_entropy(data_or_system, mie_order=None, periods=None, exact_constant=False, theiler_window=0)`. `mie_order` defaults to 2; `mie_order=1` gives the sum of the marginal entropies.
 - `estimate_coordinate_entropy(data_or_system, mie_order=None, periods=None, exact_constant=False, theiler_window=0)`. Returns each coordinate's share of the entropy; `mie_order` defaults to 2 and must be 1 or 2. The values sum to `estimate_entropy` at the same order.
 - `estimate_coordinate_mutual_information(data_or_system, periods=None, exact_constant=False, theiler_window=0)`. Returns the mutual information of each coordinate pair.
-- `System` has the same three estimators as methods, each taking `exact_constant` and `theiler_window` (and `mie_order` for the two entropy estimators). Its `mean_log_jacobian` property is the mean log BAT Jacobian over the selected frames. It raises `ValueError` unless the system was loaded with `tree_bonds=True` and without `torsions_only`.
+- `estimate_quasi_harmonic_entropy(data_or_system, periods=None, histogram_bins=None, periodic_correlation="complex", exact_constant=False, theiler_window=0)`. Returns a dict with `quasi_harmonic`, `boltzmann_quasi_harmonic`, `first_order_gaussian`, `first_order_boltzmann` and `correlation`. See [Quasi-harmonic estimators](#quasi-harmonic-estimators).
+- `System` has the same four estimators as methods, each taking `exact_constant` and `theiler_window` (and `mie_order` for the two MIE entropy estimators, `histogram_bins` and `periodic_correlation` for the quasi-harmonic one). Its `mean_log_jacobian` property is the mean log BAT Jacobian over the selected frames. It raises `ValueError` unless the system was loaded with `tree_bonds=True` and without `torsions_only`.
 - To start from an Amber topology and trajectory, call `load_system(...)` once and use the `System` methods or pass the `System` to any estimator. The coordinate metrics come from the generated BAT coordinates automatically, and the trajectory is only read once no matter how many quantities you compute.
 
 `exact_constant=True` uses the exact finite-sample term, like the CLI's `--exact-constant`, and `theiler_window` matches the CLI's `--theiler-window`.
@@ -194,6 +238,7 @@ The suite is split by concern:
 | `tests/topology.rs` | Atom selection and file reading across layouts the fixture does not cover: solvent before or between solute molecules, counter-ions, four-point and non-Amber water, and NetCDF corner cases. |
 | `tests/validation.rs` | The input-validation contract: which inputs are refused and what each error says. |
 | `tests/coordinates.rs` | Coordinate sets: 3N - 6 tree bonds forming a spanning tree, phase angles as wrapped torsion offsets that are stiff for a rigid rotor, and the BAT Jacobian against the constructed geometry. |
+| `tests/quasi_harmonic.rs` | QH against the Gaussian entropy of independently computed sample covariances and the bivariate-normal closed form, BQH correcting QH for a bimodal coordinate, histograms against hand-counted bins, the complex torsion correlations against hand-computed Hermitian coefficients and determinants, periodic centering, validation, and the CLI flags. |
 | `tests/legacy.rs` | `--legacy` against totals produced by the original Python script on the fixture, compared bit for bit, and the legacy angle and torsion formulas. |
 | `tests/theiler.rs` | Theiler window: bitwise equality with the plain estimator at `W = 0`, brute-force agreement for every window and dimension, the closed-form constant, validation, and AR(1) bias behavior. |
 | `tests/testing.rs`, `tests/entropy.rs`, `tests/cli.rs` | Unit tests, fixture regressions, and CLI behavior. |

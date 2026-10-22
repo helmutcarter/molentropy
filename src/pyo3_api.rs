@@ -1,9 +1,11 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
+use crate::quasi_harmonic::{MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions};
 use crate::{CoordinateMetric, EntropyOptions, FiniteSampleConstant};
 use numpy::PyReadonlyArray2;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
+use std::collections::HashMap;
 use std::path::Path;
 
 fn to_py_err<E: std::fmt::Display>(err: E) -> PyErr {
@@ -24,6 +26,49 @@ fn entropy_options(
         },
         theiler_window,
     }
+}
+
+/// QH and BQH entropy as a dict of the totals and the terms they are built
+/// from. `histogram_bins` switches the BQH marginals from nearest neighbor to a
+/// histogram.
+fn quasi_harmonic(
+    one_d_data: &[Vec<f64>],
+    frames: usize,
+    metrics: &[CoordinateMetric],
+    histogram_bins: Option<usize>,
+    periodic_correlation: &str,
+    exact_constant: bool,
+    theiler_window: usize,
+) -> PyResult<HashMap<&'static str, f64>> {
+    let quasi_harmonic = QuasiHarmonicOptions {
+        marginals: match histogram_bins {
+            Some(bins) => MarginalEstimator::Histogram { bins },
+            None => MarginalEstimator::NearestNeighbor,
+        },
+        periodic: match periodic_correlation {
+            "complex" => PeriodicCorrelation::Complex,
+            "centered" => PeriodicCorrelation::Centered,
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "periodic_correlation must be 'complex' or 'centered', got {other:?}"
+                )));
+            }
+        },
+    };
+    let entropy = crate::quasi_harmonic::estimate_quasi_harmonic_entropy(
+        one_d_data,
+        frames,
+        &quasi_harmonic,
+        &entropy_options(metrics, exact_constant, theiler_window),
+    )
+    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    Ok(HashMap::from([
+        ("quasi_harmonic", entropy.quasi_harmonic),
+        ("boltzmann_quasi_harmonic", entropy.boltzmann_quasi_harmonic),
+        ("first_order_gaussian", entropy.first_order_gaussian),
+        ("first_order_boltzmann", entropy.first_order_boltzmann),
+        ("correlation", entropy.correlation),
+    ]))
 }
 
 fn array_to_one_d_data(data: PyReadonlyArray2<f64>) -> (Vec<Vec<f64>>, usize) {
@@ -247,6 +292,29 @@ impl System {
         })
     }
 
+    /// QH and BQH entropy; see the module function of the same name.
+    #[pyo3(signature = (histogram_bins=None, periodic_correlation="complex", exact_constant=false, theiler_window=0))]
+    fn estimate_quasi_harmonic_entropy(
+        &self,
+        py: Python<'_>,
+        histogram_bins: Option<usize>,
+        periodic_correlation: &str,
+        exact_constant: bool,
+        theiler_window: usize,
+    ) -> PyResult<HashMap<&'static str, f64>> {
+        py.allow_threads(|| {
+            quasi_harmonic(
+                &self.one_d_data,
+                self.frames,
+                &self.metrics,
+                histogram_bins,
+                periodic_correlation,
+                exact_constant,
+                theiler_window,
+            )
+        })
+    }
+
     #[pyo3(signature = (exact_constant=false, theiler_window=0))]
     fn estimate_coordinate_mutual_information(
         &self,
@@ -368,6 +436,36 @@ fn estimate_coordinate_mutual_information(
     })
 }
 
+/// Quasi-harmonic (QH) and Boltzmann quasi-harmonic (BQH) entropy, as a dict
+/// with keys `quasi_harmonic`, `boltzmann_quasi_harmonic`,
+/// `first_order_gaussian`, `first_order_boltzmann` and `correlation`. BQH
+/// uses nearest-neighbor marginals unless `histogram_bins` is given. Periodic
+/// coordinates enter the correlation matrix as e^(i phi) unless
+/// `periodic_correlation="centered"`.
+#[pyfunction(signature = (data, periods=None, histogram_bins=None, periodic_correlation="complex", exact_constant=false, theiler_window=0))]
+fn estimate_quasi_harmonic_entropy(
+    py: Python<'_>,
+    data: &Bound<'_, PyAny>,
+    periods: Option<Vec<Option<f64>>>,
+    histogram_bins: Option<usize>,
+    periodic_correlation: &str,
+    exact_constant: bool,
+    theiler_window: usize,
+) -> PyResult<HashMap<&'static str, f64>> {
+    let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods)?;
+    py.allow_threads(move || {
+        quasi_harmonic(
+            &one_d_data,
+            frames_end,
+            &metrics,
+            histogram_bins,
+            periodic_correlation,
+            exact_constant,
+            theiler_window,
+        )
+    })
+}
+
 #[pymodule]
 fn nn_entropy(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<System>()?;
@@ -375,5 +473,6 @@ fn nn_entropy(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_entropy, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_coordinate_entropy, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_coordinate_mutual_information, m)?)?;
+    m.add_function(wrap_pyfunction!(estimate_quasi_harmonic_entropy, m)?)?;
     Ok(())
 }
