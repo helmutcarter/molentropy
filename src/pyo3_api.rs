@@ -5,7 +5,7 @@
 //! the GIL while it runs.
 
 #![allow(unsafe_op_in_unsafe_fn)]
-use crate::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
+use crate::bat_library::{BondSet, CoordinateKind, CoordinateOptions, InternalCoordinates};
 use crate::quasi_harmonic::{MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions};
 use crate::{CoordinateMetric, EntropyOptions, FiniteSampleConstant};
 use numpy::PyReadonlyArray2;
@@ -145,6 +145,8 @@ fn metrics_from_periods(
         .collect()
 }
 
+// One argument per keyword of `load_system`.
+#[allow(clippy::too_many_arguments)]
 fn system_from_trajectory(
     top_path: &str,
     traj_path: &str,
@@ -153,54 +155,27 @@ fn system_from_trajectory(
     torsions_only: Option<bool>,
     stride: Option<usize>,
     options: CoordinateOptions,
+    periodic: bool,
 ) -> PyResult<System> {
-    let top = Path::new(top_path);
-    let traj = Path::new(traj_path);
     let start = start.unwrap_or(0);
-    let torsions_only = torsions_only.unwrap_or(false);
     let stride = stride.unwrap_or(1);
-    if stride == 0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "stride must be at least 1",
-        ));
-    }
-
-    let mut internal = InternalCoordinates::with_options(top, options).map_err(to_py_err)?;
+    let mut internal =
+        InternalCoordinates::with_options(Path::new(top_path), options).map_err(to_py_err)?;
     internal
-        .calculate_internal_coords(traj, stop.unwrap_or(usize::MAX), torsions_only)
+        .calculate_internal_coords(
+            Path::new(traj_path),
+            stop.unwrap_or(usize::MAX),
+            torsions_only.unwrap_or(false),
+        )
         .map_err(to_py_err)?;
-
-    let frame_count = internal.int_coords.len();
-    if frame_count == 0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "no frames read from trajectory",
-        ));
-    }
-    if start >= frame_count {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "start is beyond available frames",
-        ));
-    }
-    let dim = internal.int_coords[0].len();
-    if dim == 0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "no internal coordinates were generated",
-        ));
-    }
-
-    let metrics = internal.coordinate_metrics();
-    let selected_frames = (frame_count - start).div_ceil(stride);
-    let mut one_d_data: Vec<Vec<f64>> = vec![Vec::with_capacity(selected_frames); dim];
-    for frame in internal.int_coords.iter().skip(start).step_by(stride) {
-        if frame.len() != dim {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "inconsistent internal coordinate dimensions",
-            ));
-        }
-        for (i, value) in frame.iter().enumerate() {
-            one_d_data[i].push(*value);
-        }
-    }
+    let one_d_data = internal
+        .columns(start, stride)
+        .map_err(|err| pyo3::exceptions::PyValueError::new_err(err.to_string()))?;
+    let metrics = if periodic {
+        internal.coordinate_metrics()
+    } else {
+        vec![CoordinateMetric::Linear; internal.dim]
+    };
 
     // The Jacobian is only defined for the tree bond set with every coordinate;
     // otherwise the System has none to report.
@@ -219,6 +194,8 @@ fn system_from_trajectory(
         frames,
         metrics,
         mean_log_jacobian,
+        atoms: internal.coordinate_atoms(),
+        kinds: internal.coordinate_kinds(),
     })
 }
 
@@ -251,6 +228,8 @@ struct System {
     frames: usize,
     metrics: Vec<CoordinateMetric>,
     mean_log_jacobian: Option<f64>,
+    atoms: Vec<Vec<usize>>,
+    kinds: Vec<CoordinateKind>,
 }
 
 #[pymethods]
@@ -263,6 +242,32 @@ impl System {
     #[getter]
     fn coordinates(&self) -> usize {
         self.one_d_data.len()
+    }
+
+    /// Topology atom indices of each coordinate, counted from 0: two for a
+    /// bond, three for an angle (vertex in the middle), four for a torsion.
+    #[getter]
+    fn atoms(&self) -> Vec<Vec<usize>> {
+        self.atoms.clone()
+    }
+
+    /// The kind of each coordinate: "bond", "angle", "torsion" or "phase angle".
+    #[getter]
+    fn kinds(&self) -> Vec<&'static str> {
+        self.kinds.iter().map(|kind| kind.name()).collect()
+    }
+
+    /// For each coordinate, the index of the torsion it is a phase angle of,
+    /// or None.
+    #[getter]
+    fn phase_references(&self) -> Vec<Option<usize>> {
+        self.kinds
+            .iter()
+            .map(|kind| match kind {
+                CoordinateKind::PhaseAngle { reference } => Some(*reference),
+                _ => None,
+            })
+            .collect()
     }
 
     #[getter]
@@ -398,7 +403,7 @@ impl System {
 
 // Python keyword arguments, so the count is set by the public signature.
 #[allow(clippy::too_many_arguments)]
-#[pyfunction(signature = (top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None, tree_bonds=false, phase_angles=true))]
+#[pyfunction(signature = (top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None, tree_bonds=false, phase_angles=true, periodic=true))]
 fn load_system(
     py: Python<'_>,
     top_path: &str,
@@ -409,6 +414,7 @@ fn load_system(
     stride: Option<usize>,
     tree_bonds: bool,
     phase_angles: bool,
+    periodic: bool,
 ) -> PyResult<System> {
     let options = CoordinateOptions {
         bonds: if tree_bonds {
@@ -428,6 +434,7 @@ fn load_system(
             torsions_only,
             stride,
             options,
+            periodic,
         )
     })
 }

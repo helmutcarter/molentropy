@@ -193,6 +193,20 @@ def check_coordinate_options():
     else:
         raise AssertionError("mean_log_jacobian needs tree_bonds=True")
 
+    # The coordinates are described in the order of every per-coordinate result.
+    assert len(phase.atoms) == len(phase.kinds) == len(phase.phase_references) == phase.coordinates
+    sizes = {"bond": 2, "angle": 3, "torsion": 4, "phase angle": 4}
+    for atoms, kind, reference, period in zip(phase.atoms, phase.kinds, phase.phase_references, phase.periods):
+        assert len(atoms) == sizes[kind], (atoms, kind)
+        assert (reference is not None) == (kind == "phase angle"), (kind, reference)
+        assert (period is not None) == (len(atoms) == 4), (kind, period)
+    assert "phase angle" in phase.kinds and "phase angle" not in plain.kinds
+
+    linear = nn_entropy.load_system(top, traj, periodic=False)
+    assert all(p is None for p in linear.periods)
+    assert linear.data == phase.data
+    assert linear.estimate_entropy() != phase.estimate_entropy()
+
     tree = nn_entropy.load_system(top, traj, tree_bonds=True, phase_angles=True)
     assert tree.coordinates > plain.coordinates, "tree bonds should add X-H bonds"
     assert math.isfinite(tree.mean_log_jacobian)
