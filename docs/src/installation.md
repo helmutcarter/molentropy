@@ -1,0 +1,23 @@
+# Installation
+
+## Requirements
+
+- Rust 1.94 or newer.
+- For Python bindings: a Python environment with build tooling for `pyo3` (see below).
+
+## Command line and Rust library
+
+```bash
+cargo build --release
+```
+
+The program is then at `target/release/nn_entropy`, or run it through cargo as `cargo run --release <path_to_parm7> <path_to_nc>`.
+
+## Python bindings
+
+The Python module is built with [maturin](https://www.maturin.rs/):
+
+```bash
+maturin develop --release              # into the active environment
+maturin build --release --out dist     # or as a wheel
+```

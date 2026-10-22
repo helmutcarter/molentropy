@@ -1,4 +1,5 @@
-//! Reproduces the butane end-state comparison in `nn_entropy::validation`.
+//! Reproduces the butane end-state comparison in the user guide,
+//! <https://helmutcarter.github.io/nn-entropy/validation.html>.
 //!
 //! ```text
 //! cargo run --release --example butane_validation -- <dir> <reference> [<dir> <reference> ...]
