@@ -41,20 +41,29 @@ jobs:
       - name: Tests
         run: cargo test --locked --no-fail-fast
 
-  # Broken intra-doc links and missing docs fail the build; doctests run in
-  # the Tests step above.
+  # The user guide must build, and broken intra-doc links or missing docs in
+  # the API documentation fail it; doctests run in the Tests step above.
   docs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # Keep in sync with the version in pages.yml and CONTRIBUTING.md.
+      - name: Install mdBook
+        uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: "0.4.52"
+
+      - name: Build the user guide
+        run: mdbook build docs
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build docs
+      - name: Build the API docs
         run: cargo doc --no-deps --locked
         env:
           RUSTDOCFLAGS: -D warnings

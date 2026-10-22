@@ -1,6 +1,6 @@
 name: Docs site
 
-# Publishes the rustdoc for main to GitHub Pages.
+# Publishes the user guide (the mdBook in docs/) for main to GitHub Pages.
 on:
   push:
     branches: [main]
@@ -23,23 +23,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      # Keep in sync with the version in ci.yml and CONTRIBUTING.md.
+      - name: Install mdBook
+        uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: "0.4.52"
 
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Build docs
-        run: cargo doc --no-deps --locked
-        env:
-          RUSTDOCFLAGS: -D warnings
-
-      # rustdoc writes one directory per crate; send the site root to ours.
-      - name: Add root redirect
-        run: echo '<meta http-equiv="refresh" content="0; url=nn_entropy/index.html">' > target/doc/index.html
+      - name: Build the book
+        run: mdbook build docs
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: target/doc
+          path: docs/book
 
   deploy:
     needs: build

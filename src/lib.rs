@@ -5,7 +5,8 @@
 //! It reads Amber topologies and NetCDF trajectories, converts them to
 //! internal coordinates, and offers several estimators that work on any array
 //! of sampled coordinates. A command-line program and Python bindings expose
-//! the same estimators; see the README for those.
+//! the same estimators; the [user guide](https://helmutcarter.github.io/nn-entropy/) documents them and the
+//! methods.
 //!
 //! # Choosing an estimator
 //!
@@ -13,7 +14,7 @@
 //!   [`quasi_harmonic::estimate_quasi_harmonic_entropy`]: each coordinate's own
 //!   entropy from its actual distribution, plus a Gaussian correlation term.
 //!   The most accurate estimator in the crate on the systems tested so far; see
-//!   [`validation`].
+//!   the [validation results](https://helmutcarter.github.io/nn-entropy/validation.html).
 //! - **Nearest-neighbor mutual information expansion (NN MIE)**,
 //!   [`calculate_entropy`]: nearest-neighbor entropies of single coordinates
 //!   and of pairs (up to sets of four), combined by a truncated expansion.
@@ -95,8 +96,6 @@
 //!   [`bat_library::CoordinateOptions`].
 //! - [`quasi_harmonic`]: the QH and BQH estimators.
 //! - [`legacy`]: the reproduction of the original Python implementation.
-//! - [`validation`]: how the estimators compare with thermodynamic reference
-//!   values.
 //! - [`pyo3_api`]: the Python extension module.
 
 #![warn(missing_docs)]
@@ -110,7 +109,6 @@ pub mod bat_library;
 pub mod legacy;
 pub mod pyo3_api;
 pub mod quasi_harmonic;
-pub mod validation;
 
 /// Metric used for one internal-coordinate dimension.
 #[derive(Debug, Clone, Copy, PartialEq)]

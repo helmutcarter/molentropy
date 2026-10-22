@@ -1,7 +1,7 @@
 //! The `nn_entropy` Python extension module, built with maturin.
 //!
-//! Its functions are called from Python, not from Rust; the README documents
-//! the Python API. Every function wraps an estimator of this crate and releases
+//! Its functions are called from Python, not from Rust; the user guide
+//! documents the Python API: <https://helmutcarter.github.io/nn-entropy/python.html>. Every function wraps an estimator of this crate and releases
 //! the GIL while it runs.
 
 #![allow(unsafe_op_in_unsafe_fn)]

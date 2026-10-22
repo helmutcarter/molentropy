@@ -8,3 +8,4 @@
 *.pyc
 scripts/*
 internal/*
+/docs/book
