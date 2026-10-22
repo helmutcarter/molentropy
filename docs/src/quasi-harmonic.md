@@ -13,4 +13,15 @@ The covariance is the population covariance over the selected frames, so there m
 
 `--periodic-correlation centered` puts the centered and wrapped torsions into C as real coordinates instead. That is adequate for torsions confined to one narrow well, where both treatments agree, but a correlation between torsions that sweep the circle looks like a weak sawtooth after wrapping and is largely missed.
 
+## Per-coordinate entropies
+
+`--per-coordinate`, `estimate_coordinate_quasi_harmonic_entropy` in Python and Rust, gives each coordinate's share of the QH and BQH entropy. The first-order terms belong to single coordinates already. The correlation term `½ ln|C|` belongs to the whole set and is shared out using `ln|C| = tr(log C)`: coordinate i receives `½ (log C)_ii`, computed from the eigendecomposition of C. The shares
+
+- sum to the correlation term exactly,
+- do not depend on the order of the coordinates,
+- are each at most 0, because C has a unit diagonal, and are about 0 for a coordinate independent of the others,
+- split the correlation of two coordinates evenly: each receives `¼ ln(1 - |ρ|²)`.
+
+Like the NN MIE's even split of pairwise mutual information, this is one convention for dividing a quantity that belongs to the whole set; its advantage is that it involves no further choices, such as an ordering of the coordinates.
+
 See [Validation](validation.md) for how the estimators compare with thermodynamic reference values.

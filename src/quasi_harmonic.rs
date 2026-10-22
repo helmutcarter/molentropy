@@ -82,6 +82,23 @@ pub struct QuasiHarmonicEntropy {
     pub correlation: f64,
 }
 
+/// Each coordinate's share of the QH and BQH entropy, in units of k_B. Every
+/// vector has one entry per coordinate and sums to the matching field of
+/// [`QuasiHarmonicEntropy`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoordinateQuasiHarmonicEntropy {
+    /// `first_order_gaussian + correlation`, per coordinate.
+    pub quasi_harmonic: Vec<f64>,
+    /// `first_order_boltzmann + correlation`, per coordinate.
+    pub boltzmann_quasi_harmonic: Vec<f64>,
+    /// 1/2 ln(2 pi e sigma_ii).
+    pub first_order_gaussian: Vec<f64>,
+    /// -integral p ln p of the coordinate, from the marginal estimator.
+    pub first_order_boltzmann: Vec<f64>,
+    /// 1/2 (log C)_ii, never positive. See [`estimate_coordinate_quasi_harmonic_entropy`].
+    pub correlation: Vec<f64>,
+}
+
 /// QH and BQH entropy of the coordinates in `one_d_data`.
 ///
 /// `options.metrics` marks the periodic coordinates. The correlation matrix
@@ -93,6 +110,71 @@ pub fn estimate_quasi_harmonic_entropy(
     quasi_harmonic: &QuasiHarmonicOptions,
     options: &EntropyOptions,
 ) -> Result<QuasiHarmonicEntropy, String> {
+    let terms = terms(one_d_data, frames_end, quasi_harmonic, options)?;
+    let first_order_gaussian = terms.first_order_gaussian.iter().sum();
+    let first_order_boltzmann = terms.first_order_boltzmann.iter().sum();
+    let correlation = 0.5 * log_determinant(&terms.correlation)?;
+    Ok(QuasiHarmonicEntropy {
+        quasi_harmonic: first_order_gaussian + correlation,
+        boltzmann_quasi_harmonic: first_order_boltzmann + correlation,
+        first_order_gaussian,
+        first_order_boltzmann,
+        correlation,
+    })
+}
+
+/// Each coordinate's share of the QH and BQH entropy of `one_d_data`.
+///
+/// The first-order terms belong to single coordinates already. The
+/// correlation term 1/2 ln|C| belongs to the whole set; it is shared out using
+/// ln|C| = tr(log C), so coordinate i receives 1/2 (log C)_ii. The shares sum
+/// to the correlation term exactly, do not depend on the order of the
+/// coordinates, and are each at most 0 because C has a unit diagonal. A
+/// coordinate correlated with many others carries a large negative share; one
+/// independent of the rest carries 0.
+///
+/// The totals match [`estimate_quasi_harmonic_entropy`] up to rounding, and the
+/// same conditions apply.
+pub fn estimate_coordinate_quasi_harmonic_entropy(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    quasi_harmonic: &QuasiHarmonicOptions,
+    options: &EntropyOptions,
+) -> Result<CoordinateQuasiHarmonicEntropy, String> {
+    let terms = terms(one_d_data, frames_end, quasi_harmonic, options)?;
+    let correlation: Vec<f64> = log_diagonal(&terms.correlation)?
+        .into_iter()
+        .map(|value| 0.5 * value)
+        .collect();
+    let add = |first_order: &[f64]| -> Vec<f64> {
+        first_order
+            .iter()
+            .zip(&correlation)
+            .map(|(a, b)| a + b)
+            .collect()
+    };
+    Ok(CoordinateQuasiHarmonicEntropy {
+        quasi_harmonic: add(&terms.first_order_gaussian),
+        boltzmann_quasi_harmonic: add(&terms.first_order_boltzmann),
+        first_order_gaussian: terms.first_order_gaussian,
+        first_order_boltzmann: terms.first_order_boltzmann,
+        correlation,
+    })
+}
+
+/// The per-coordinate first-order terms and the correlation matrix.
+struct Terms {
+    first_order_gaussian: Vec<f64>,
+    first_order_boltzmann: Vec<f64>,
+    correlation: Vec<Vec<Complex>>,
+}
+
+fn terms(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    quasi_harmonic: &QuasiHarmonicOptions,
+    options: &EntropyOptions,
+) -> Result<Terms, String> {
     let (one_d_data, metrics) = resolve_input(one_d_data, frames_end, options)?;
     let dimensions = one_d_data.len();
     if frames_end <= dimensions {
@@ -112,7 +194,7 @@ pub fn estimate_quasi_harmonic_entropy(
             let variance = mean_square(values);
             0.5 * (2.0 * std::f64::consts::PI * std::f64::consts::E * variance).ln()
         })
-        .sum();
+        .collect();
 
     let deviations: Vec<Deviations> = centered
         .into_par_iter()
@@ -130,7 +212,7 @@ pub fn estimate_quasi_harmonic_entropy(
         )
         .map(Deviations::standardized)
         .collect();
-    let correlation = 0.5 * log_determinant(&correlation_matrix(&deviations))?;
+    let correlation = correlation_matrix(&deviations);
 
     let first_order_boltzmann = match quasi_harmonic.marginals {
         MarginalEstimator::NearestNeighbor => coordinate_entropy_impl(
@@ -138,9 +220,7 @@ pub fn estimate_quasi_harmonic_entropy(
             &metrics,
             options.constant,
             options.theiler_window,
-        )?
-        .iter()
-        .sum(),
+        )?,
         MarginalEstimator::Histogram { bins } => {
             if bins == 0 {
                 return Err("histogram needs at least one bin".to_string());
@@ -149,13 +229,11 @@ pub fn estimate_quasi_harmonic_entropy(
                 .iter()
                 .zip(&metrics)
                 .map(|(values, metric)| histogram_entropy(values, *metric, bins))
-                .sum()
+                .collect()
         }
     };
 
-    Ok(QuasiHarmonicEntropy {
-        quasi_harmonic: first_order_gaussian + correlation,
-        boltzmann_quasi_harmonic: first_order_boltzmann + correlation,
+    Ok(Terms {
         first_order_gaussian,
         first_order_boltzmann,
         correlation,
@@ -305,6 +383,58 @@ fn log_determinant(matrix: &[Vec<Complex>]) -> Result<f64, String> {
         }
     }
     Ok(log_det)
+}
+
+/// The diagonal of log A for a Hermitian positive-definite matrix A, from its
+/// eigendecomposition A = V diag(lambda) V^H: (log A)_ii = sum over k of
+/// |V_ik|^2 ln lambda_k.
+fn log_diagonal(matrix: &[Vec<Complex>]) -> Result<Vec<f64>, String> {
+    let n = matrix.len();
+    let singular = || {
+        "the correlation matrix is singular: some coordinate is a linear combination of others"
+            .to_string()
+    };
+    let log_eigenvalues = |eigenvalues: &[f64]| -> Result<Vec<f64>, String> {
+        eigenvalues
+            .iter()
+            .map(|&lambda| {
+                if lambda.is_finite() && lambda > 0.0 {
+                    Ok(lambda.ln())
+                } else {
+                    Err(singular())
+                }
+            })
+            .collect()
+    };
+    if matrix
+        .iter()
+        .flatten()
+        .all(|&(_, imaginary)| imaginary == 0.0)
+    {
+        let a = nalgebra::DMatrix::from_fn(n, n, |i, j| matrix[i][j].0);
+        let eigen = a.symmetric_eigen();
+        let logs = log_eigenvalues(eigen.eigenvalues.as_slice())?;
+        Ok((0..n)
+            .map(|i| {
+                (0..n)
+                    .map(|k| eigen.eigenvectors[(i, k)].powi(2) * logs[k])
+                    .sum()
+            })
+            .collect())
+    } else {
+        let a = nalgebra::DMatrix::from_fn(n, n, |i, j| {
+            nalgebra::Complex::new(matrix[i][j].0, matrix[i][j].1)
+        });
+        let eigen = a.symmetric_eigen();
+        let logs = log_eigenvalues(eigen.eigenvalues.as_slice())?;
+        Ok((0..n)
+            .map(|i| {
+                (0..n)
+                    .map(|k| eigen.eigenvectors[(i, k)].norm_sqr() * logs[k])
+                    .sum()
+            })
+            .collect())
+    }
 }
 
 /// -sum p_k ln(p_k / width) over `bins` equal bins.
