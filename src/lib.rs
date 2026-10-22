@@ -1,3 +1,106 @@
+//! Configurational entropy of molecules from molecular dynamics trajectories.
+//!
+//! The crate estimates the entropy of a molecule's internal coordinates
+//! (bond lengths, bond angles and torsions) from the frames of a simulation.
+//! It reads Amber topologies and NetCDF trajectories, converts them to
+//! internal coordinates, and offers several estimators that work on any array
+//! of sampled coordinates. A command-line program and Python bindings expose
+//! the same estimators; see the README for those.
+//!
+//! # Choosing an estimator
+//!
+//! - **Boltzmann quasi-harmonic (BQH)**,
+//!   [`quasi_harmonic::estimate_quasi_harmonic_entropy`]: each coordinate's own
+//!   entropy from its actual distribution, plus a Gaussian correlation term.
+//!   The most accurate estimator in the crate on the systems tested so far; see
+//!   [`validation`].
+//! - **Nearest-neighbor mutual information expansion (NN MIE)**,
+//!   [`calculate_entropy`]: nearest-neighbor entropies of single coordinates
+//!   and of pairs (up to sets of four), combined by a truncated expansion.
+//!   Makes no assumption about the shape of any distribution, but the sum of
+//!   many pairwise terms is noisy.
+//! - **Quasi-harmonic (QH)**, the same function as BQH: a Gaussian fit to
+//!   every coordinate. Fast, but overestimates the entropy of multiwell
+//!   torsions.
+//! - [`legacy::legacy_entropy`] reproduces the original Python implementation
+//!   bit for bit and exists only for comparison with historical results.
+//!
+//! Every estimator returns a differential entropy in natural-log units
+//! (units of k_B). That is the entropy of the coordinates as sampled: it does
+//! not include the BAT Jacobian, momentum, or a standard state, so it is
+//! meaningful as a difference between ensembles of the same molecule, not as an
+//! absolute thermodynamic entropy. [`bat_library::InternalCoordinates::log_jacobian`]
+//! supplies the Jacobian term when the Cartesian entropy is wanted.
+//!
+//! # From a trajectory
+//!
+//! ```no_run
+//! use std::path::Path;
+//!
+//! use nn_entropy::EntropyOptions;
+//! use nn_entropy::bat_library::InternalCoordinates;
+//! use nn_entropy::quasi_harmonic::{QuasiHarmonicOptions, estimate_quasi_harmonic_entropy};
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // Heavy-atom bonds, angles, and torsions with phase angles: the defaults.
+//! let mut internal = InternalCoordinates::new(Path::new("system.parm7"))?;
+//! internal.calculate_internal_coords(Path::new("trajectory.nc"), usize::MAX, false)?;
+//!
+//! // int_coords is [frame][coordinate]; the estimators take [coordinate][frame].
+//! let frames = internal.int_coords.len();
+//! let data: Vec<Vec<f64>> = (0..internal.dim)
+//!     .map(|j| internal.int_coords.iter().map(|frame| frame[j]).collect())
+//!     .collect();
+//! let metrics = internal.coordinate_metrics(); // torsions are periodic
+//! let options = EntropyOptions { metrics: Some(&metrics), ..Default::default() };
+//!
+//! let entropy = estimate_quasi_harmonic_entropy(
+//!     &data,
+//!     frames,
+//!     &QuasiHarmonicOptions::default(),
+//!     &options,
+//! )?;
+//! println!("BQH entropy: {} k_B", entropy.boltzmann_quasi_harmonic);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # From arrays
+//!
+//! Any coordinates work, one `Vec<f64>` per coordinate:
+//!
+//! ```
+//! use nn_entropy::{CoordinateMetric, EntropyOptions, calculate_entropy};
+//!
+//! // An angle sweeping the circle and a coordinate that follows it.
+//! let phi: Vec<f64> = (0..2000).map(|i| (i as f64 * 2.399963).rem_euclid(std::f64::consts::TAU)).collect();
+//! let x: Vec<f64> = phi.iter().enumerate().map(|(i, p)| p.cos() + 0.1 * ((i * 7919) % 101) as f64 / 101.0).collect();
+//!
+//! let metrics = [
+//!     CoordinateMetric::Periodic { period: std::f64::consts::TAU },
+//!     CoordinateMetric::Linear,
+//! ];
+//! let options = EntropyOptions { metrics: Some(&metrics), ..Default::default() };
+//! let first_order = calculate_entropy(&[phi.clone(), x.clone()], 2000, 1, &options)?;
+//! let second_order = calculate_entropy(&[phi, x], 2000, 2, &options)?;
+//! // The second-order term subtracts the mutual information of the pair.
+//! assert!(second_order < first_order);
+//! # Ok::<(), String>(())
+//! ```
+//!
+//! # Modules
+//!
+//! - [`bat_library`]: Amber topology and trajectory reading, solute selection,
+//!   and the bond-angle-torsion coordinates, with the options in
+//!   [`bat_library::CoordinateOptions`].
+//! - [`quasi_harmonic`]: the QH and BQH estimators.
+//! - [`legacy`]: the reproduction of the original Python implementation.
+//! - [`validation`]: how the estimators compare with thermodynamic reference
+//!   values.
+//! - [`pyo3_api`]: the Python extension module.
+
+#![warn(missing_docs)]
+
 use kiddo::ImmutableKdTree;
 use kiddo::SquaredEuclidean;
 use rayon::prelude::*;
@@ -7,12 +110,19 @@ pub mod bat_library;
 pub mod legacy;
 pub mod pyo3_api;
 pub mod quasi_harmonic;
+pub mod validation;
 
 /// Metric used for one internal-coordinate dimension.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CoordinateMetric {
+    /// Ordinary distance on the real line, for bond lengths and angles.
     Linear,
-    Periodic { period: f64 },
+    /// Distance on a circle of circumference `period`, for torsions (period
+    /// 2 pi). Values may lie anywhere; they are reduced modulo the period.
+    Periodic {
+        /// Length of one full turn, in the coordinate's units.
+        period: f64,
+    },
 }
 
 /// Sample-size term used in the Kozachenko-Leonenko entropy constant.
@@ -192,6 +302,7 @@ fn combination_from_rank<const K: usize>(mut rank: usize, n: usize) -> [usize; K
 pub struct EntropyOptions<'a> {
     /// Per-coordinate metrics; `None` treats every coordinate as linear.
     pub metrics: Option<&'a [CoordinateMetric]>,
+    /// Sample-size term of the nearest-neighbor entropy constant.
     pub constant: FiniteSampleConstant,
     /// Theiler window `w`: a frame's nearest neighbor must be more than `w`
     /// frames away from it in time. 0 allows every other frame.
@@ -649,6 +760,10 @@ pub fn calc_joint_nn_with_window<const K: usize>(
     }
     Ok(distance_total)
 }
+/// `nn_distance * reciprocal_n_frames + constant`, as a fused multiply-add when
+/// the `fma` feature is enabled: a nearest-neighbor entropy from the sum over
+/// frames of ln(nearest-neighbor distance), already multiplied by the
+/// dimension. The estimators call it; it is public for testing.
 pub fn estimate_entropy_efficient(
     nn_distance: f64,
     reciprocal_n_frames: f64,

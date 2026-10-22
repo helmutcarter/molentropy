@@ -41,6 +41,24 @@ jobs:
       - name: Tests
         run: cargo test --locked --no-fail-fast
 
+  # Broken intra-doc links and missing docs fail the build; doctests run in
+  # the Tests step above.
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build docs
+        run: cargo doc --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
   # Keep in sync with rust-version in Cargo.toml.
   msrv:
     name: Minimum Rust version

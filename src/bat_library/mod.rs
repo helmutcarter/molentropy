@@ -1,3 +1,15 @@
+//! Amber topologies and trajectories to bond-angle-torsion (BAT) coordinates.
+//!
+//! [`InternalCoordinates`] reads a `.parm7` topology, selects the solute
+//! (water and massless virtual sites are excluded; molecules may appear in any
+//! order), builds a BAT tree for each molecule, and evaluates its coordinates
+//! on every frame of a NetCDF trajectory. [`CoordinateOptions`] chooses the bond
+//! set, phase angles and the geometry formulas.
+//!
+//! The coordinates of each molecule, in order, are its bonds, its angles and
+//! its torsions. Bonds and angles are linear coordinates, torsions periodic with
+//! period 2 pi; [`InternalCoordinates::coordinate_metrics`] reports which.
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::fs::File;
@@ -10,6 +22,7 @@ pub mod geometry;
 
 use geometry::{internal_coordinates, internal_coordinates_f32};
 
+/// Result of reading files and building coordinates.
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 #[derive(Debug, Clone)]
@@ -799,6 +812,7 @@ pub enum Geometry {
 /// The default is heavy-atom bonds, phase angles and the standard geometry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoordinateOptions {
+    /// Which bonds are coordinates.
     pub bonds: BondSet,
     /// Replace each torsion that shares its central bond with an earlier
     /// torsion by its offset from that earlier one, a phase angle. See
@@ -806,6 +820,7 @@ pub struct CoordinateOptions {
     /// torsions of atoms that rotate together, such as a methyl group's
     /// hydrogens, are redundant, and every estimator does worse on them.
     pub phase_angles: bool,
+    /// The angle and torsion formulas.
     pub geometry: Geometry,
 }
 
@@ -819,6 +834,12 @@ impl Default for CoordinateOptions {
     }
 }
 
+/// The internal coordinates of the solute of a topology, and their values on
+/// the frames of a trajectory.
+///
+/// Build it from a topology with [`new`](Self::new) or
+/// [`with_options`](Self::with_options), then read a trajectory with
+/// [`calculate_internal_coords`](Self::calculate_internal_coords).
 pub struct InternalCoordinates {
     /// BAT entries, indexing into `atoms` (not into the topology).
     bat_list: Vec<Vec<usize>>,
@@ -830,8 +851,16 @@ pub struct InternalCoordinates {
     /// Whether `calculate_internal_coords` dropped every coordinate but the
     /// torsions.
     torsions_only: bool,
+    /// Number of coordinates.
     pub dim: usize,
+    /// Coordinate values, `int_coords[frame][coordinate]`, filled by
+    /// [`calculate_internal_coords`](Self::calculate_internal_coords). Bond
+    /// lengths are in the trajectory's units (Å for Amber), angles and
+    /// torsions in radians, torsions in (-pi, pi].
     pub int_coords: Vec<Vec<f64>>,
+    /// Every coordinate index pair `(i, j)` with `i < j`, filled by
+    /// [`coordinate_pairs`](Self::coordinate_pairs). The estimators do not use
+    /// it.
     pub pairs: Vec<(usize, usize)>,
 }
 
@@ -865,10 +894,16 @@ fn is_excluded(prmtop: &Prmtop, index: usize) -> bool {
 }
 
 impl InternalCoordinates {
+    /// The coordinates of the solute of the topology at `top`, with the
+    /// default [`CoordinateOptions`]: heavy-atom bonds, phase angles and the
+    /// standard geometry.
     pub fn new(top: &Path) -> Result<Self> {
         Self::with_options(top, CoordinateOptions::default())
     }
 
+    /// The coordinates of the solute of the topology at `top`, defined by
+    /// `options`. Fails if the topology cannot be read or a molecule has no
+    /// valid BAT tree.
     pub fn with_options(top: &Path, options: CoordinateOptions) -> Result<Self> {
         let prmtop = parse_prmtop(top)?;
         if prmtop.masses.len() != prmtop.natom || prmtop.atom_types.len() != prmtop.natom {
@@ -968,6 +1003,17 @@ impl InternalCoordinates {
         })
     }
 
+    /// Reads up to `frames` frames of the NetCDF trajectory at `traj` and
+    /// evaluates every coordinate on them, filling
+    /// [`int_coords`](Self::int_coords). `usize::MAX` reads every frame.
+    ///
+    /// `torsions_only` first drops every coordinate but the torsions, for good:
+    /// [`dim`](Self::dim) and every per-coordinate method then describe the
+    /// torsions alone.
+    ///
+    /// The trajectory must have exactly as many atoms as the topology. Phase
+    /// angles and the legacy geometry are applied here, so calling this again
+    /// recomputes everything from the positions.
     pub fn calculate_internal_coords(
         &mut self,
         traj: &Path,
@@ -1113,6 +1159,9 @@ impl InternalCoordinates {
             .collect())
     }
 
+    /// Fills [`pairs`](Self::pairs) with every coordinate index pair `(i, j)`,
+    /// `i < j`, in lexicographic order, the order of
+    /// [`estimate_coordinate_mutual_information`](crate::estimate_coordinate_mutual_information).
     pub fn coordinate_pairs(&mut self) {
         let mut pairs = Vec::new();
         for i in 0..self.dim {
@@ -1126,6 +1175,9 @@ impl InternalCoordinates {
         self.pairs = pairs;
     }
 
+    /// The metric of each coordinate: periodic with period 2 pi for torsions
+    /// (phase angles included), linear for bonds and angles. Pass it to the
+    /// estimators through [`EntropyOptions::metrics`](crate::EntropyOptions::metrics).
     pub fn coordinate_metrics(&self) -> Vec<CoordinateMetric> {
         self.bat_list
             .iter()

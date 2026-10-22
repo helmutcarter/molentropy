@@ -75,28 +75,11 @@ The covariance is the population covariance over the selected frames, so there m
 
 `--periodic-correlation centered` puts the centered and wrapped torsions into C as real coordinates instead. That is adequate for torsions confined to one narrow well, where both treatments agree, but a correlation between torsions that sweep the circle looks like a weak sawtooth after wrapping and is largely missed.
 
-See [Validation](#validation) for how the estimators compare against a thermodynamic reference.
+See [Validation](#validation) for how the estimators compare with thermodynamic reference values.
 
 ## Validation
 
-The butane end states of an alchemical transformation give an exact entropy difference to test against. State 0 has the bonded potentials of state 1 with the torsion terms switched off; state 1 is ordinary butane. Both were simulated in the gas phase at 320 K with X-H bonds constrained (OpenMM, Langevin, 10,000 frames per end state). Thermodynamic integration and MBAR over 21 λ windows of 10 ns give `T ΔS = ΔU - ΔA` for each of three independent replicates, with no density estimate involved. Masses do not change, so momentum entropy cancels, and the reference is a Cartesian configurational entropy: the BAT estimates below include `Δ⟨ln J⟩`, about -0.06 nats. The default coordinate set is exactly the 26 unconstrained, nonredundant coordinates.
-
-`S0 - S1` in nats, estimated from each replicate's end-state trajectories:
-
-| estimator | rep 1 | rep 2 | rep 3 | mean error | RMSE |
-|---|---|---|---|---|---|
-| reference (TI/MBAR) | 14.219 | 14.429 | 14.325 | | |
-| **BQH** | 14.238 | 14.480 | 14.348 | **+0.031** | **0.034** |
-| BQH, `--periodic-correlation centered` | 14.214 | 14.459 | 14.327 | +0.009 | 0.018 |
-| BQH, `--histogram-bins 100` | 14.165 | 14.340 | 14.226 | -0.081 | 0.083 |
-| NN MIE-2 | 14.541 | 13.950 | 14.160 | -0.107 | 0.346 |
-| QH | 13.388 | 13.505 | 13.408 | -0.891 | 0.892 |
-| NN MIE-2, `--no-phase-angles` | 16.314 | 15.446 | 17.879 | +2.222 | 2.453 |
-| BQH, `--no-phase-angles` | 17.189 | 17.446 | 17.147 | +2.936 | 2.938 |
-
-BQH with phase angles agrees with the reference within the reference's own uncertainty (about 0.08 nats per replicate) and follows its replicate-to-replicate variation. QH misses by 0.9 nats because its Gaussian first-order term cannot represent the multiwell torsions of state 1. NN MIE-2 is unbiased on average but varies by ±0.4 nats between replicates, because summing many pairwise mutual informations accumulates estimator error. Without phase angles every estimator is off by 0.4 to 3.7 nats; the redundant torsions of the methyl rotors are the cause.
-
-This is one small molecule, so it shows which estimators work here, not a general error bar. The complex and centered treatments agree here because, with phase angles, only four torsions remain free and their correlations are weak; they differ when strongly correlated torsions sweep the circle, as the raw methyl torsions do.
+The estimators have been checked against thermodynamic reference entropies: on the butane end states, BQH with phase angles agrees with thermodynamic integration within the reference's uncertainty. The `validation` page of the [API documentation](#documentation) has the results for every estimator and an example program that reproduces them.
 
 ## Legacy mode
 
@@ -233,6 +216,14 @@ What the validation shows (`tests/theiler.rs`):
 
 Use a window when output is dense compared with the coordinates' correlation times. Choose `W` from a sweep: plot the entropy against `W` and take a value where the curve has stopped moving for the fast coordinates. Prefer a window to a stride when the goal is only to remove temporal neighbors.
 
+## Documentation
+
+The Rust API is documented with rustdoc, including a guide to choosing an estimator and the validation results:
+
+```bash
+cargo doc --no-deps --open
+```
+
 ## Tests
 
 ```bash
@@ -276,11 +267,15 @@ test on Python 3.10 and 3.12. A separate job checks that the crate still builds
 on the minimum supported Rust version, 1.94 (`rust-version` in `Cargo.toml`).
 
 ## Project layout
-- `src/lib.rs`: entropy estimators, the MIE, and the nearest-neighbor search.
+- `src/lib.rs`: the nearest-neighbor estimators, the MIE, and the nearest-neighbor search; also the crate documentation.
+- `src/quasi_harmonic.rs`: the QH and BQH estimators.
+- `src/legacy.rs`: the reproduction of the original Python implementation.
+- `src/validation.rs`: documentation only, the validation results.
 - `src/bat_library/`: `.parm7` parser, NetCDF trajectory reader, solute selection, and BAT coordinate construction (`geometry.rs` holds the bond, angle and torsion functions).
 - `src/main.rs`: CLI entry point.
 - `src/pyo3_api.rs`: Python bindings.
 - `tests/`: the test suite (see [Tests](#tests)).
+- `examples/butane_validation.rs`: reproduces the validation results from the butane trajectories.
 
 ## Further Reading
 - [Grid inhomogeneous solvation theory: Hydration structure and thermodynamics of the miniature receptor cucurbit[7]uril](https://pmc.ncbi.nlm.nih.gov/articles/PMC3416872/) - Uses nearest neighbor method to calculate first-order estimate of solvent entropy
