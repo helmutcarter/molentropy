@@ -1,5 +1,5 @@
 #![allow(unsafe_op_in_unsafe_fn)]
-use crate::bat_library::InternalCoordinates;
+use crate::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
 use crate::{CoordinateMetric, EntropyOptions, FiniteSampleConstant};
 use numpy::PyReadonlyArray2;
 use pyo3::prelude::*;
@@ -61,14 +61,15 @@ fn metrics_from_periods(
         .collect()
 }
 
-fn one_d_data_from_trajectory(
+fn system_from_trajectory(
     top_path: &str,
     traj_path: &str,
     start: Option<usize>,
     stop: Option<usize>,
     torsions_only: Option<bool>,
     stride: Option<usize>,
-) -> PyResult<(Vec<Vec<f64>>, usize, Vec<CoordinateMetric>)> {
+    options: CoordinateOptions,
+) -> PyResult<System> {
     let top = Path::new(top_path);
     let traj = Path::new(traj_path);
     let start = start.unwrap_or(0);
@@ -80,7 +81,7 @@ fn one_d_data_from_trajectory(
         ));
     }
 
-    let mut internal = InternalCoordinates::new(top).map_err(to_py_err)?;
+    let mut internal = InternalCoordinates::with_options(top, options).map_err(to_py_err)?;
     internal
         .calculate_internal_coords(traj, stop.unwrap_or(usize::MAX), torsions_only)
         .map_err(to_py_err)?;
@@ -117,8 +118,24 @@ fn one_d_data_from_trajectory(
         }
     }
 
-    let used_frames = one_d_data[0].len();
-    Ok((one_d_data, used_frames, metrics))
+    // The Jacobian is only defined for the tree bond set with every coordinate;
+    // otherwise the System has none to report.
+    let mean_log_jacobian = internal.log_jacobian().ok().map(|log_jacobian| {
+        let selected: Vec<f64> = log_jacobian
+            .into_iter()
+            .skip(start)
+            .step_by(stride)
+            .collect();
+        selected.iter().sum::<f64>() / selected.len() as f64
+    });
+
+    let frames = one_d_data[0].len();
+    Ok(System {
+        one_d_data,
+        frames,
+        metrics,
+        mean_log_jacobian,
+    })
 }
 
 fn one_d_data_from_py(
@@ -149,6 +166,7 @@ struct System {
     one_d_data: Vec<Vec<f64>>,
     frames: usize,
     metrics: Vec<CoordinateMetric>,
+    mean_log_jacobian: Option<f64>,
 }
 
 #[pymethods]
@@ -177,6 +195,18 @@ impl System {
                 CoordinateMetric::Periodic { period } => Some(*period),
             })
             .collect()
+    }
+
+    /// Mean over the selected frames of ln J, the internal part of the BAT
+    /// Jacobian. Available only for a System loaded with `tree_bonds=True`
+    /// and without `torsions_only`.
+    #[getter]
+    fn mean_log_jacobian(&self) -> PyResult<f64> {
+        self.mean_log_jacobian.ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(
+                "the BAT Jacobian needs tree_bonds=True and every coordinate type",
+            )
+        })
     }
 
     #[pyo3(signature = (mie_order=None, exact_constant=false, theiler_window=0))]
@@ -235,7 +265,9 @@ impl System {
     }
 }
 
-#[pyfunction(signature = (top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None))]
+// Python keyword arguments, so the count is set by the public signature.
+#[allow(clippy::too_many_arguments)]
+#[pyfunction(signature = (top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None, tree_bonds=false, phase_angles=false))]
 fn load_system(
     py: Python<'_>,
     top_path: &str,
@@ -244,14 +276,27 @@ fn load_system(
     stop: Option<usize>,
     torsions_only: Option<bool>,
     stride: Option<usize>,
+    tree_bonds: bool,
+    phase_angles: bool,
 ) -> PyResult<System> {
-    let (one_d_data, frames, metrics) = py.allow_threads(move || {
-        one_d_data_from_trajectory(top_path, traj_path, start, stop, torsions_only, stride)
-    })?;
-    Ok(System {
-        one_d_data,
-        frames,
-        metrics,
+    let options = CoordinateOptions {
+        bonds: if tree_bonds {
+            BondSet::Tree
+        } else {
+            BondSet::HeavyAtom
+        },
+        phase_angles,
+    };
+    py.allow_threads(move || {
+        system_from_trajectory(
+            top_path,
+            traj_path,
+            start,
+            stop,
+            torsions_only,
+            stride,
+            options,
+        )
     })
 }
 

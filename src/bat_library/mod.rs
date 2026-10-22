@@ -719,23 +719,34 @@ fn build_bat_list(
     adjacency: &[Vec<usize>],
     hydrogens: &HashSet<usize>,
     masses: &[f64],
+    bonds: BondSet,
 ) -> Result<Vec<Vec<usize>>> {
     let mut bat_list = Vec::new();
 
-    let fragment_set: HashSet<usize> = fragment.iter().copied().collect();
-    for &a in fragment {
-        for &b in adjacency[a].iter() {
-            if a < b
-                && fragment_set.contains(&b)
-                && !hydrogens.contains(&a)
-                && !hydrogens.contains(&b)
-            {
-                bat_list.push(vec![a, b]);
+    let bat = build_bat(fragment, adjacency, masses)?;
+    if bonds == BondSet::Tree {
+        // The two root bonds, then the bond that places each later atom, in
+        // the same order as the angles and torsions below.
+        bat_list.push(vec![bat.root[0], bat.root[1]]);
+        bat_list.push(vec![bat.root[1], bat.root[2]]);
+        for t in bat.torsions.iter() {
+            bat_list.push(vec![t[0], t[1]]);
+        }
+    } else {
+        let fragment_set: HashSet<usize> = fragment.iter().copied().collect();
+        for &a in fragment {
+            for &b in adjacency[a].iter() {
+                if a < b
+                    && fragment_set.contains(&b)
+                    && !hydrogens.contains(&a)
+                    && !hydrogens.contains(&b)
+                {
+                    bat_list.push(vec![a, b]);
+                }
             }
         }
     }
 
-    let bat = build_bat(fragment, adjacency, masses)?;
     bat_list.push(vec![bat.root[0], bat.root[1], bat.root[2]]);
     for angle in bat.angles.iter() {
         bat_list.push(vec![angle[0], angle[1], angle[2]]);
@@ -747,6 +758,30 @@ fn build_bat_list(
     Ok(bat_list)
 }
 
+/// Which bonds the internal-coordinate set includes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BondSet {
+    /// Every bond between two heavy atoms, ring closures included. Bonds to
+    /// hydrogen are left out because they are usually constrained.
+    #[default]
+    HeavyAtom,
+    /// The bonds of the BAT spanning tree: the two root bonds and the bond
+    /// that places each later atom, hydrogens included, ring closures left out.
+    /// With the angles and torsions this is a non-redundant set of 3N - 6
+    /// coordinates per molecule, the set the BAT Jacobian is defined for.
+    Tree,
+}
+
+/// How a topology's internal coordinates are defined.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CoordinateOptions {
+    pub bonds: BondSet,
+    /// Replace each torsion that shares its central bond with an earlier
+    /// torsion by its offset from that earlier one, a phase angle. See
+    /// [`InternalCoordinates::phase_references`].
+    pub phase_angles: bool,
+}
+
 pub struct InternalCoordinates {
     /// BAT entries, indexing into `atoms` (not into the topology).
     bat_list: Vec<Vec<usize>>,
@@ -754,6 +789,10 @@ pub struct InternalCoordinates {
     atoms: Vec<usize>,
     /// Total atom count declared by the topology.
     natom: usize,
+    options: CoordinateOptions,
+    /// Whether `calculate_internal_coords` dropped every coordinate but the
+    /// torsions.
+    torsions_only: bool,
     pub dim: usize,
     pub int_coords: Vec<Vec<f64>>,
     pub pairs: Vec<(usize, usize)>,
@@ -790,6 +829,10 @@ fn is_excluded(prmtop: &Prmtop, index: usize) -> bool {
 
 impl InternalCoordinates {
     pub fn new(top: &Path) -> Result<Self> {
+        Self::with_options(top, CoordinateOptions::default())
+    }
+
+    pub fn with_options(top: &Path, options: CoordinateOptions) -> Result<Self> {
         let prmtop = parse_prmtop(top)?;
         if prmtop.masses.len() != prmtop.natom || prmtop.atom_types.len() != prmtop.natom {
             return Err("topology MASS or atom type section is shorter than NATOM".into());
@@ -841,10 +884,12 @@ impl InternalCoordinates {
                 // coordinates at all.
                 1 => continue,
                 // A diatomic has a single internal coordinate, its bond, which
-                // is kept under the same heavy-atom rule as every other bond.
+                // is kept under the same rule as every other bond.
                 2 => {
                     let (a, b) = (fragment[0].min(fragment[1]), fragment[0].max(fragment[1]));
-                    if !hydrogens.contains(&a) && !hydrogens.contains(&b) {
+                    if options.bonds == BondSet::Tree
+                        || (!hydrogens.contains(&a) && !hydrogens.contains(&b))
+                    {
                         bat_list.push(vec![a, b]);
                     }
                 }
@@ -853,6 +898,7 @@ impl InternalCoordinates {
                     &adjacency,
                     &hydrogens,
                     &prmtop.masses,
+                    options.bonds,
                 )?),
             }
             atoms.extend(fragment);
@@ -877,6 +923,8 @@ impl InternalCoordinates {
             bat_list,
             atoms,
             natom: prmtop.natom,
+            options,
+            torsions_only: false,
             dim,
             int_coords: Vec::new(),
             pairs: Vec::new(),
@@ -899,6 +947,7 @@ impl InternalCoordinates {
                 .cloned()
                 .collect();
             self.dim = self.bat_list.len();
+            self.torsions_only = true;
         }
         if vartype == 5 {
             let coords = reader.read_coordinates_f32(frames, &self.atoms)?;
@@ -907,7 +956,89 @@ impl InternalCoordinates {
             let coords = reader.read_coordinates_f64(frames, &self.atoms)?;
             self.int_coords = internal_coordinates(&self.bat_list, &coords);
         }
+        if self.options.phase_angles {
+            let references = self.phase_references();
+            for frame in self.int_coords.iter_mut() {
+                for (index, reference) in references.iter().enumerate() {
+                    if let Some(reference) = *reference {
+                        frame[index] = wrap_angle(frame[index] - frame[reference]);
+                    }
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// Topology atom indices of each coordinate: 2 for a bond, 3 for an angle
+    /// (vertex in the middle), 4 for a torsion about the middle two atoms.
+    pub fn coordinate_atoms(&self) -> Vec<Vec<usize>> {
+        self.bat_list
+            .iter()
+            .map(|entry| entry.iter().map(|&local| self.atoms[local]).collect())
+            .collect()
+    }
+
+    /// For each coordinate, the index of the torsion it is a phase angle of,
+    /// or `None` for a coordinate that is not a phase angle.
+    ///
+    /// With `phase_angles` set, the first torsion about each central bond, in
+    /// coordinate order, keeps its value and every later torsion about the same
+    /// bond becomes its offset from that first one, wrapped to (-pi, pi]. The
+    /// map is a shear on the torus with unit Jacobian, so the joint entropy of
+    /// the full set is unchanged. The offsets of atoms that rotate together are
+    /// stiff and nearly independent of the reference, so a truncated MIE drops
+    /// less correlation than with the raw torsions.
+    pub fn phase_references(&self) -> Vec<Option<usize>> {
+        let mut references = vec![None; self.bat_list.len()];
+        if !self.options.phase_angles {
+            return references;
+        }
+        let mut first_about: HashMap<(usize, usize), usize> = HashMap::new();
+        for (index, entry) in self.bat_list.iter().enumerate() {
+            if entry.len() != 4 {
+                continue;
+            }
+            let bond = (entry[1].min(entry[2]), entry[1].max(entry[2]));
+            match first_about.get(&bond) {
+                Some(&reference) => references[index] = Some(reference),
+                None => {
+                    first_about.insert(bond, index);
+                }
+            }
+        }
+        references
+    }
+
+    /// ln J for each frame, where J = prod over bonds of b^2 times prod over
+    /// angles of sin(theta) is the internal-coordinate part of the
+    /// Cartesian-to-BAT Jacobian. Adding the mean over frames to the BAT
+    /// entropy gives the entropy of the internal motion in Cartesian
+    /// coordinates. Bond lengths are in the trajectory's units.
+    ///
+    /// Defined only for the full non-redundant set: `BondSet::Tree`, without
+    /// `torsions_only`. Phase angles do not change it.
+    pub fn log_jacobian(&self) -> Result<Vec<f64>> {
+        if self.options.bonds != BondSet::Tree {
+            return Err("the BAT Jacobian needs the tree bond set".into());
+        }
+        if self.torsions_only {
+            return Err("the BAT Jacobian needs bonds and angles, not torsions only".into());
+        }
+        Ok(self
+            .int_coords
+            .iter()
+            .map(|frame| {
+                self.bat_list
+                    .iter()
+                    .zip(frame)
+                    .map(|(entry, value)| match entry.len() {
+                        2 => 2.0 * value.ln(),
+                        3 => value.sin().ln(),
+                        _ => 0.0,
+                    })
+                    .sum()
+            })
+            .collect())
     }
 
     pub fn coordinate_pairs(&mut self) {
@@ -937,4 +1068,10 @@ impl InternalCoordinates {
             })
             .collect()
     }
+}
+
+/// `angle` wrapped to (-pi, pi], the range of the torsions themselves.
+fn wrap_angle(angle: f64) -> f64 {
+    use std::f64::consts::PI;
+    PI - (PI - angle).rem_euclid(2.0 * PI)
 }

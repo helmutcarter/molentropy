@@ -1,14 +1,14 @@
 use std::env;
 use std::path::Path;
 
-use nn_entropy::bat_library::InternalCoordinates;
+use nn_entropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
 use nn_entropy::{CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--phase-angles] [--jacobian]",
             args[0]
         );
         std::process::exit(1);
@@ -17,6 +17,9 @@ fn main() {
     let traj_path = Path::new(&args[2]);
 
     let mut torsions_only = false;
+    let mut phase_angles = false;
+    let mut tree_bonds = false;
+    let mut jacobian = false;
     let mut no_periodic = false;
     let mut exact_constant = false;
     let mut start: Option<usize> = None;
@@ -30,6 +33,18 @@ fn main() {
         match args[i].as_str() {
             "--torsions-only" => {
                 torsions_only = true;
+                i += 1;
+            }
+            "--phase-angles" => {
+                phase_angles = true;
+                i += 1;
+            }
+            "--tree-bonds" => {
+                tree_bonds = true;
+                i += 1;
+            }
+            "--jacobian" => {
+                jacobian = true;
                 i += 1;
             }
             "--no-periodic" => {
@@ -104,6 +119,10 @@ fn main() {
         eprintln!("--stride must be at least 1");
         std::process::exit(1);
     }
+    if jacobian && (!tree_bonds || torsions_only) {
+        eprintln!("--jacobian requires --tree-bonds and cannot be combined with --torsions-only");
+        std::process::exit(1);
+    }
 
     if use_python {
         if !cfg!(debug_assertions) {
@@ -149,8 +168,16 @@ fn main() {
         return;
     }
 
-    let mut internal =
-        InternalCoordinates::new(top_path).expect("failed to build BAT list from topology");
+    let coordinate_options = CoordinateOptions {
+        bonds: if tree_bonds {
+            BondSet::Tree
+        } else {
+            BondSet::HeavyAtom
+        },
+        phase_angles,
+    };
+    let mut internal = InternalCoordinates::with_options(top_path, coordinate_options)
+        .expect("failed to build BAT list from topology");
     internal
         .calculate_internal_coords(traj_path, stop.unwrap_or(usize::MAX), torsions_only)
         .expect("failed to read trajectory or compute BAT coordinates");
@@ -210,5 +237,15 @@ fn main() {
             std::process::exit(1);
         }
     };
+    if jacobian {
+        // Over the same frames the entropy used.
+        let log_jacobian = internal
+            .log_jacobian()
+            .expect("--tree-bonds without --torsions-only was checked above");
+        let mean =
+            log_jacobian.iter().skip(start).step_by(stride).sum::<f64>() / used_frames as f64;
+        println!("Mean ln J = {}", mean);
+    }
+    // Last, so scripts that read the final "= value" still get the entropy.
     println!("Total entropy = {}", entropy);
 }
