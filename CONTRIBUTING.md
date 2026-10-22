@@ -43,6 +43,15 @@ and `cargo test` (doctests included) on every push to main and every pull reques
 plus the wheel build and smoke test on Python 3.10 and 3.12. Separate jobs build
 the user guide and the API documentation and check that the crate still builds on
 the minimum supported Rust version, 1.94 (`rust-version` in `Cargo.toml`).
+A coverage job reports line and region coverage per file in the run's summary,
+without a threshold. To measure it locally:
+
+```bash
+cargo llvm-cov --release --summary-only --ignore-filename-regex 'pyo3_api\.rs'
+```
+
+The Python bindings are excluded: the Rust tests cannot reach them, and the
+smoke test that does runs outside `cargo`.
 
 ## Documentation
 
