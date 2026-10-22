@@ -10,7 +10,10 @@ use common::amber::{
 };
 
 use nn_entropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
-use nn_entropy::{CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy};
+use nn_entropy::{
+    CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy,
+    estimate_coordinate_mutual_information,
+};
 
 fn fixture(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel)
@@ -354,8 +357,11 @@ fn argument_errors_are_reported_without_panicking() {
             "--mie-order must be 1, 2, 3, or 4",
         ),
         (&["--stride", "0"][..], "--stride must be at least 1"),
-        (&["--start", "5"][..], "--start is beyond available frames"),
-        (&["--stop", "0"][..], "No frames read from trajectory"),
+        (&["--start", "5"][..], "start 5 is beyond the 5 frames read"),
+        (
+            &["--stop", "0"][..],
+            "no frames were read from the trajectory",
+        ),
         (&["--bogus"][..], "Unknown argument: --bogus"),
     ] {
         let mut full = vec![top, traj];
@@ -402,6 +408,90 @@ fn a_system_without_internal_coordinates_is_reported() {
     );
     assert_fails(
         &[top.to_str().unwrap(), traj.to_str().unwrap()],
-        "No internal coordinates were generated",
+        "no internal coordinates were generated",
     );
+}
+
+#[test]
+fn documented_usage_matches_the_program() {
+    let output = Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+        .output()
+        .expect("failed to run CLI");
+    let usage = String::from_utf8_lossy(&output.stderr);
+    let flags = usage
+        .lines()
+        .next()
+        .and_then(|line| line.split_once("<path_to_nc> "))
+        .map(|(_, flags)| flags.trim().to_string())
+        .expect("usage line");
+    for document in ["README.md", "docs/src/cli.md"] {
+        let text = std::fs::read_to_string(fixture(document)).unwrap();
+        let documented = text
+            .lines()
+            .find_map(|line| line.strip_prefix("cargo run --release <path_to_parm7> <path_to_nc> "))
+            .unwrap_or_else(|| panic!("{document} has no full usage line"));
+        assert_eq!(documented.trim(), flags, "{document} is out of date");
+    }
+}
+
+#[test]
+fn mutual_information_table_lists_every_pair() {
+    let top = fixture("tests/fixtures/test.parm7");
+    let traj = fixture("tests/fixtures/test.nc");
+    let output = run_cli(&["--mutual-information"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lines = stdout.lines();
+    assert_eq!(
+        lines.next(),
+        Some("coordinate_a\tcoordinate_b\tmutual_information")
+    );
+    let rows: Vec<(usize, usize, f64)> = lines
+        .take_while(|line| !line.contains('='))
+        .map(|line| {
+            let fields: Vec<&str> = line.split('\t').collect();
+            (
+                fields[0].parse().unwrap(),
+                fields[1].parse().unwrap(),
+                fields[2].parse().unwrap(),
+            )
+        })
+        .collect();
+
+    let mut internal = InternalCoordinates::new(&top).unwrap();
+    internal
+        .calculate_internal_coords(&traj, usize::MAX, false)
+        .unwrap();
+    let metrics = internal.coordinate_metrics();
+    let data = internal.columns(0, 1).unwrap();
+    let options = EntropyOptions {
+        metrics: Some(&metrics),
+        ..Default::default()
+    };
+    let expected = estimate_coordinate_mutual_information(&data, data[0].len(), &options).unwrap();
+    let n = internal.dim;
+    assert_eq!(rows.len(), n * (n - 1) / 2);
+    let pairs = (1..=n).flat_map(|i| ((i + 1)..=n).map(move |j| (i, j)));
+    for ((row, (i, j)), value) in rows.iter().zip(pairs).zip(&expected) {
+        assert_eq!((row.0, row.1), (i, j));
+        assert_eq!(row.2, *value);
+    }
+
+    for (args, message) in [
+        (
+            &["--mutual-information", "--estimator", "bqh"][..],
+            "applies only to --estimator nn",
+        ),
+        (
+            &["--mutual-information", "--legacy"][..],
+            "--mutual-information cannot be combined",
+        ),
+    ] {
+        let output = run_cli(args);
+        assert!(!output.status.success(), "{args:?} should fail");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(message),
+            "{args:?}"
+        );
+    }
 }

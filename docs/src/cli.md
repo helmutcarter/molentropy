@@ -1,7 +1,7 @@
 # Command line
 
 ```bash
-cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered]
+cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information]
 ```
 
 Example:
@@ -25,7 +25,9 @@ cargo run --release <path_to_parm7> <path_to_nc>
 - `--no-phase-angles` uses the raw torsions. By default each torsion that shares its central bond with an earlier torsion is replaced by its offset from that torsion. See [Coordinate sets](coordinates.md).
 - `--jacobian` also prints `Mean ln J = ...`, the mean of the log BAT Jacobian over the frames used, on the line before the entropy. It requires `--tree-bonds` and cannot be combined with `--torsions-only`.
 - `--legacy` reproduces the original Python implementation bit for bit. See [Legacy mode](legacy.md).
+- With `--estimator qh` or `bqh`, two lines before the total give the terms it is the sum of: `First-order entropy = ...` and `Correlation term = ...`.
 - `--estimator` chooses the estimator: `nn` (the default) is the nearest-neighbor MIE, `qh` is quasi-harmonic, and `bqh` is Boltzmann quasi-harmonic. See [Quasi-harmonic estimators](quasi-harmonic.md). `--mie-order` applies only to `nn`.
 - `--histogram-bins N` makes `bqh` estimate each coordinate's first-order entropy from an N-bin histogram instead of nearest neighbors.
-- `--per-coordinate` also prints a tab-separated table of each coordinate's share of the entropy before the total: its number, type (`bond`, `angle`, `torsion` or `phase angle`), atoms (numbered from 1, as in Amber and cpptraj), and entropy. The shares sum to the total. It works with `--estimator nn` at `--mie-order` 1 or 2 and with `qh` and `bqh`; see [Quasi-harmonic estimators](quasi-harmonic.md#per-coordinate-entropies) for how their correlation term is shared out. It cannot be combined with `--legacy`.
+- `--per-coordinate` also prints a tab-separated table of each coordinate's share of the entropy before the total: its number, type (`bond`, `angle`, `torsion` or `phase angle`), atoms (numbered from 1, as in Amber and cpptraj), and entropy. The shares sum to the total. It works with `--estimator nn` at `--mie-order` 1 or 2 and with `qh` and `bqh`, for which the table has two more columns, `first_order` and `correlation`, the two terms each coordinate's entropy is the sum of; see [Quasi-harmonic estimators](quasi-harmonic.md#per-coordinate-entropies) for how their correlation term is shared out. It cannot be combined with `--legacy`.
+- `--mutual-information` also prints a tab-separated table of the mutual information of every pair of coordinates, numbered as in `--per-coordinate`. It applies only to `--estimator nn`.
 - `--periodic-correlation complex|centered` sets how torsions enter the quasi-harmonic correlation term; `complex`, the default, is Harpole and Sharp's `e^{iφ}`. See [Quasi-harmonic estimators](quasi-harmonic.md).
