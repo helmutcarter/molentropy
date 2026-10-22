@@ -834,6 +834,36 @@ impl Default for CoordinateOptions {
     }
 }
 
+/// What kind of internal coordinate a value is; see
+/// [`InternalCoordinates::coordinate_kinds`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoordinateKind {
+    /// A bond length.
+    Bond,
+    /// A bond angle.
+    Angle,
+    /// A torsion.
+    Torsion,
+    /// A torsion's offset from the torsion at index `reference`, which turns
+    /// about the same central bond.
+    PhaseAngle {
+        /// Index of the reference torsion among the coordinates.
+        reference: usize,
+    },
+}
+
+impl CoordinateKind {
+    /// "bond", "angle", "torsion" or "phase angle".
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Bond => "bond",
+            Self::Angle => "angle",
+            Self::Torsion => "torsion",
+            Self::PhaseAngle { .. } => "phase angle",
+        }
+    }
+}
+
 /// The internal coordinates of the solute of a topology, and their values on
 /// the frames of a trajectory.
 ///
@@ -1085,6 +1115,45 @@ impl InternalCoordinates {
                 }
             }
         }
+    }
+
+    /// The values of every coordinate on frames `start`, `start + stride`, ...
+    /// of those read, as `columns[coordinate][frame]`: the layout the
+    /// estimators take. Fails if no frames were read, `start` is past the
+    /// last of them, `stride` is 0, or there are no coordinates.
+    pub fn columns(&self, start: usize, stride: usize) -> Result<Vec<Vec<f64>>> {
+        if stride == 0 {
+            return Err("stride must be at least 1".into());
+        }
+        let frames = self.int_coords.len();
+        if frames == 0 {
+            return Err("no frames were read from the trajectory".into());
+        }
+        if start >= frames {
+            return Err(format!("start {start} is beyond the {frames} frames read").into());
+        }
+        if self.dim == 0 {
+            return Err("no internal coordinates were generated".into());
+        }
+        let selected: Vec<&Vec<f64>> = self.int_coords.iter().skip(start).step_by(stride).collect();
+        Ok((0..self.dim)
+            .map(|coordinate| selected.iter().map(|frame| frame[coordinate]).collect())
+            .collect())
+    }
+
+    /// The kind of each coordinate, with the reference torsion of each phase
+    /// angle.
+    pub fn coordinate_kinds(&self) -> Vec<CoordinateKind> {
+        self.bat_list
+            .iter()
+            .zip(self.phase_references())
+            .map(|(entry, reference)| match (entry.len(), reference) {
+                (2, _) => CoordinateKind::Bond,
+                (3, _) => CoordinateKind::Angle,
+                (_, Some(reference)) => CoordinateKind::PhaseAngle { reference },
+                _ => CoordinateKind::Torsion,
+            })
+            .collect()
     }
 
     /// Topology atom indices of each coordinate: 2 for a bond, 3 for an angle

@@ -35,9 +35,7 @@ fn load(dir: &Path, state: &str, phase_angles: bool) -> Result<State, Error> {
     let mut internal =
         InternalCoordinates::with_options(&dir.join(format!("{state}.top")), options)?;
     internal.calculate_internal_coords(&dir.join(format!("{state}.nc")), usize::MAX, false)?;
-    let data = (0..internal.dim)
-        .map(|j| internal.int_coords.iter().map(|frame| frame[j]).collect())
-        .collect();
+    let data = internal.columns(0, 1)?;
     Ok(State {
         data,
         metrics: internal.coordinate_metrics(),

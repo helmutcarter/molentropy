@@ -50,7 +50,7 @@ let references = internal.phase_references();  // Some(i) for a phase angle of t
 let log_jacobian = internal.log_jacobian()?;   // per frame; tree bonds only
 ```
 
-`internal.int_coords` holds the values with shape `[n_frames][n_coords]`.
+`internal.int_coords` holds the values with shape `[n_frames][n_coords]`. The estimators take `[n_coords][n_frames]`, which `internal.columns(start, stride)` returns for the frames `start`, `start + stride`, ..., the same selection as the CLI's `--start` and `--stride`. `internal.coordinate_kinds()` gives each coordinate's kind (`Bond`, `Angle`, `Torsion`, or `PhaseAngle { reference }`).
 
 The quasi-harmonic estimators take the same data and options, plus their own settings:
 

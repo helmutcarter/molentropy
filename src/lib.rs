@@ -47,11 +47,9 @@
 //! let mut internal = InternalCoordinates::new(Path::new("system.parm7"))?;
 //! internal.calculate_internal_coords(Path::new("trajectory.nc"), usize::MAX, false)?;
 //!
-//! // int_coords is [frame][coordinate]; the estimators take [coordinate][frame].
-//! let frames = internal.int_coords.len();
-//! let data: Vec<Vec<f64>> = (0..internal.dim)
-//!     .map(|j| internal.int_coords.iter().map(|frame| frame[j]).collect())
-//!     .collect();
+//! // Every frame (start 0, stride 1), as data[coordinate][frame].
+//! let data = internal.columns(0, 1)?;
+//! let frames = data[0].len();
 //! let metrics = internal.coordinate_metrics(); // torsions are periodic
 //! let options = EntropyOptions { metrics: Some(&metrics), ..Default::default() };
 //!

@@ -16,7 +16,7 @@ use common::Rng;
 use common::amber::{
     NetcdfOptions, Topology, concat_frames, scratch_path, write_netcdf, write_prmtop,
 };
-use nn_entropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
+use nn_entropy::bat_library::{BondSet, CoordinateKind, CoordinateOptions, InternalCoordinates};
 
 const FRAMES: usize = 40;
 
@@ -503,4 +503,77 @@ fn coordinate_pairs_follow_the_mutual_information_order() {
         .collect();
     assert_eq!(internal.pairs, expected);
     assert_eq!(internal.pairs.len(), n * (n - 1) / 2);
+}
+
+#[test]
+fn columns_select_and_transpose_frames() {
+    let (top, traj, _) = ethane("columns");
+    let internal = load(&top, &traj, BondSet::HeavyAtom, true, false);
+    for (start, stride) in [(0, 1), (3, 1), (2, 5), (FRAMES - 1, 7)] {
+        let columns = internal.columns(start, stride).unwrap();
+        assert_eq!(columns.len(), internal.dim);
+        let frames: Vec<usize> = (start..FRAMES).step_by(stride).collect();
+        for (coordinate, column) in columns.iter().enumerate() {
+            let expected: Vec<f64> = frames
+                .iter()
+                .map(|&f| internal.int_coords[f][coordinate])
+                .collect();
+            assert_eq!(column, &expected, "start {start}, stride {stride}");
+        }
+    }
+}
+
+#[test]
+fn columns_refuse_what_they_cannot_select() {
+    let (top, traj, _) = ethane("columns_refused");
+    let internal = load(&top, &traj, BondSet::HeavyAtom, true, false);
+    let message = |start, stride| internal.columns(start, stride).unwrap_err().to_string();
+    assert_eq!(message(0, 0), "stride must be at least 1");
+    assert_eq!(
+        message(FRAMES, 1),
+        format!("start {FRAMES} is beyond the {FRAMES} frames read")
+    );
+
+    let mut none = InternalCoordinates::new(&top).unwrap();
+    none.calculate_internal_coords(&traj, 0, false).unwrap();
+    assert_eq!(
+        none.columns(0, 1).unwrap_err().to_string(),
+        "no frames were read from the trajectory"
+    );
+
+    // HCl has no coordinate under the heavy-atom bond set.
+    let mut rng = Rng::new(17);
+    let (top, traj, _) = write_system("columns_hcl", &HCL_ATOMS, &HCL_BONDS, &hcl_frames(&mut rng));
+    let hcl = load(&top, &traj, BondSet::HeavyAtom, false, false);
+    assert_eq!(
+        hcl.columns(0, 1).unwrap_err().to_string(),
+        "no internal coordinates were generated"
+    );
+}
+
+#[test]
+fn coordinate_kinds_follow_atoms_and_phase_references() {
+    let (top, traj, _) = ethane("kinds");
+    for phase_angles in [true, false] {
+        let internal = load(&top, &traj, BondSet::Tree, phase_angles, false);
+        let references = internal.phase_references();
+        for ((kind, atoms), reference) in internal
+            .coordinate_kinds()
+            .into_iter()
+            .zip(internal.coordinate_atoms())
+            .zip(references)
+        {
+            let expected = match (atoms.len(), reference) {
+                (2, _) => CoordinateKind::Bond,
+                (3, _) => CoordinateKind::Angle,
+                (_, Some(reference)) => CoordinateKind::PhaseAngle { reference },
+                _ => CoordinateKind::Torsion,
+            };
+            assert_eq!(kind, expected);
+        }
+    }
+    assert_eq!(
+        CoordinateKind::PhaseAngle { reference: 3 }.name(),
+        "phase angle"
+    );
 }
