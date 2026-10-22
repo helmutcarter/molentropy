@@ -193,6 +193,7 @@ fn coordinate_flags_reach_the_coordinates_and_the_jacobian() {
     let options = CoordinateOptions {
         bonds: BondSet::Tree,
         phase_angles: true,
+        ..Default::default()
     };
     let mut internal = InternalCoordinates::with_options(&top, options).unwrap();
     internal

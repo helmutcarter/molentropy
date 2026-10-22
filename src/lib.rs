@@ -4,6 +4,7 @@ use rayon::prelude::*;
 use std::num::NonZero;
 
 pub mod bat_library;
+pub mod legacy;
 pub mod pyo3_api;
 
 /// Metric used for one internal-coordinate dimension.

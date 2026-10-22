@@ -25,7 +25,7 @@ cargo build --release
 ## CLI usage
 
 ```bash
-cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--phase-angles] [--jacobian]
+cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--phase-angles] [--jacobian] [--legacy]
 ```
 
 Example:
@@ -45,6 +45,7 @@ Notes:
 - `--tree-bonds` uses the bonds of the BAT spanning tree, including bonds to hydrogen and excluding ring closures, in place of every heavy-atom bond. See [Coordinate sets](#coordinate-sets).
 - `--phase-angles` replaces each torsion that shares its central bond with an earlier torsion by its offset from that torsion. See [Coordinate sets](#coordinate-sets).
 - `--jacobian` also prints `Mean ln J = ...`, the mean of the log BAT Jacobian over the frames used, on the line before the entropy. It requires `--tree-bonds` and cannot be combined with `--torsions-only`.
+- `--legacy` reproduces the original Python implementation bit for bit. See [Legacy mode](#legacy-mode).
 
 ## Coordinate sets
 
@@ -55,6 +56,19 @@ By default, file-based calculations use every bond between two heavy atoms (ring
 **Phase angles** (`--phase-angles`, `phase_angles=True`, `CoordinateOptions::phase_angles`) group the torsions by central bond. The first torsion about each bond, in coordinate order, keeps its value. Every later torsion about that bond is replaced by its offset from the first one, wrapped to (-π, π]. The offset is still a 2π-periodic coordinate. Because the map is a shear with unit Jacobian, the joint entropy of the full coordinate set is unchanged. A truncated MIE is not invariant, though. The raw torsions of atoms that rotate together, such as the three hydrogens of a methyl group, are strongly correlated, and a second-order expansion misses part of that correlation. Their offsets are stiff and nearly independent of the reference torsion, so less correlation is left beyond second order. Phase angles work with either bond set and with `--torsions-only`.
 
 **The BAT Jacobian** (`--jacobian`, `System.mean_log_jacobian`, `InternalCoordinates::log_jacobian`) is ln J = Σ 2 ln b + Σ ln sin θ over the tree's bonds and angles. Adding its mean to the BAT entropy gives the entropy of the internal motion measured in Cartesian coordinates. Bond lengths are in the trajectory's units (Å for Amber), so ln J depends on that choice, just as the bond-length entropies do. Phase angles do not change it.
+
+## Legacy mode
+
+`--legacy` gives the same total, to the last bit, as the original Python script `NN_entropy_calc.py`. Use it to reproduce historical results or to compare against them. It is not more accurate than the default; it undoes the corrections made since. It changes four things:
+
+- Every coordinate uses a linear metric, torsions included. This is the only change larger than rounding.
+- The estimator follows the script's arithmetic: order-2 MIE, gamma truncated to `0.57721566490153`, constants `ln(2N) + gamma` and `ln(πN) + gamma`, and per-coordinate and per-pair entropies added with Python's built-in `sum`, which uses compensated summation from Python 3.12 on.
+- Angles use the script's `acos` formula (`Geometry::Legacy`), which can return NaN for a straight angle.
+- Torsions take |b2| as `pow(x, 0.5)`, as NumPy evaluates `x ** 0.5`, which is off by one ulp from `sqrt(x)` for about 1 in 1000 inputs.
+
+It cannot be combined with `--exact-constant`, `--theiler-window`, `--mie-order` other than 2, `--tree-bonds`, `--phase-angles` or `--jacobian`, because the script had none of them. `--torsions-only`, `--start`, `--stop` and `--stride` only choose the input and are allowed. The script's `N` argument corresponds to `--stop N`.
+
+Atom selection is this crate's, which handles layouts the script did not (see [Interpretation and limitations](#interpretation-and-limitations)). The script took the first atoms of the trajectory and recognized water only by the types `OW`, `HW` and `EP`. On systems it handled correctly, both select the same atoms. Bit-for-bit agreement was checked with Python 3.12, NumPy 1.26, SciPy 1.13 and MDAnalysis 2.8 on seven trajectories: the test fixture, five cpptraj sample systems (up to 821 coordinates, including a solvated one), and two 10,000-frame butane end states. A different Python or NumPy version can change the script's result in the last bits. From Rust, the mode is `bat_library::Geometry::Legacy` for the coordinates and `legacy::legacy_entropy` for the estimator.
 
 ## Rust library usage
 
@@ -89,7 +103,7 @@ To build coordinates from files, use `bat_library::InternalCoordinates`:
 ```rust
 use nn_entropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
 
-let options = CoordinateOptions { bonds: BondSet::Tree, phase_angles: true };
+let options = CoordinateOptions { bonds: BondSet::Tree, phase_angles: true, ..Default::default() };
 let mut internal = InternalCoordinates::with_options(&top, options)?; // ::new(&top) for the defaults
 internal.calculate_internal_coords(&traj, usize::MAX, false)?;
 let metrics = internal.coordinate_metrics();   // one per coordinate
@@ -141,12 +155,12 @@ Threading note:
 - File-based calculations select the solute automatically. Water is excluded when its atom type is an Amber water type (`OW`, `HW`, `EP`, `EPW`) or its residue is a water name (`WAT`, `HOH`, `SOL`, `TIP3`, `SPCE`, `OPC`, and similar), so four-point models and non-Amber water types are handled. Massless virtual sites are excluded because they carry no degrees of freedom. Monatomic species such as counter-ions contribute nothing, since they have no internal coordinates, and a diatomic contributes only its bond length (with the default bond set, only when both atoms are heavy). Solute atoms may appear anywhere in the topology.
 - The trajectory must have exactly as many atoms as the topology. A stripped topology paired with a solvated trajectory is rejected rather than read on the assumption that atoms line up.
 - Results are differential internal-coordinate entropies in natural-log units (equivalently, units of `k_B`), not kcal mol⁻¹ K⁻¹.
-- Following the historical Python implementation, the default nearest-neighbor constant uses the large-sample approximation `ln(N) + EulerGamma` in place of the exact finite-sample term `psi(N) - psi(1) = H_(N-1)`. Their per-entropy difference is approximately `1/(2N)` and is negligible for the intended 50,000-frame calculations, but it can accumulate across MIE terms or become important for very small samples. The convention is a property of the estimator, not of the total alone: pairwise mutual information shifts by exactly `H_(N-1) - (ln(N) + EulerGamma)` per pair when it changes, so per-coordinate results must be computed under the same convention as the total they are compared against. The Python implementation truncated EulerGamma to `0.57721566490153`; this crate uses the full double-precision value, so results can differ from it by roughly 1e-14.
+- Following the historical Python implementation, the default nearest-neighbor constant uses the large-sample approximation `ln(N) + EulerGamma` in place of the exact finite-sample term `psi(N) - psi(1) = H_(N-1)`. Their per-entropy difference is approximately `1/(2N)` and is negligible for the intended 50,000-frame calculations, but it can accumulate across MIE terms or become important for very small samples. The convention is a property of the estimator, not of the total alone: pairwise mutual information shifts by exactly `H_(N-1) - (ln(N) + EulerGamma)` per pair when it changes, so per-coordinate results must be computed under the same convention as the total they are compared against. The Python implementation truncated EulerGamma to `0.57721566490153`; this crate uses the full double-precision value, so results can differ from it by roughly 1e-14. `--legacy` uses the truncated value.
 - The default second-order mutual-information expansion is a truncation and can omit higher-order correlations.
 - The reported value does not include a BAT-to-Cartesian Jacobian correction, momentum entropy, or a standard-state term, and must not be described as an absolute thermodynamic entropy. `--jacobian` reports the Jacobian term separately, for the tree bond set, but does not add it to the total.
 - Exact duplicate samples use the nearest distinct coordinate point. Many ties usually indicate inadequate coordinate precision or sampling and should be investigated.
 - MD frames are generally correlated. See below.
-- File-based results differ from the historical Python implementation because torsions are now periodic. Its asymptotic finite-sample convention is kept as the default.
+- File-based results differ from the historical Python implementation because torsions are now periodic. Its asymptotic finite-sample convention is kept as the default. `--legacy` reproduces the historical results exactly.
 
 ## Correlated frames and the Theiler window
 
@@ -180,6 +194,7 @@ The suite is split by concern:
 | `tests/topology.rs` | Atom selection and file reading across layouts the fixture does not cover: solvent before or between solute molecules, counter-ions, four-point and non-Amber water, and NetCDF corner cases. |
 | `tests/validation.rs` | The input-validation contract: which inputs are refused and what each error says. |
 | `tests/coordinates.rs` | Coordinate sets: 3N - 6 tree bonds forming a spanning tree, phase angles as wrapped torsion offsets that are stiff for a rigid rotor, and the BAT Jacobian against the constructed geometry. |
+| `tests/legacy.rs` | `--legacy` against totals produced by the original Python script on the fixture, compared bit for bit, and the legacy angle and torsion formulas. |
 | `tests/theiler.rs` | Theiler window: bitwise equality with the plain estimator at `W = 0`, brute-force agreement for every window and dimension, the closed-form constant, validation, and AR(1) bias behavior. |
 | `tests/testing.rs`, `tests/entropy.rs`, `tests/cli.rs` | Unit tests, fixture regressions, and CLI behavior. |
 

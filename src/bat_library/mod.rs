@@ -745,6 +745,11 @@ fn build_bat_list(
                 }
             }
         }
+        // In atom-index order, as MDAnalysis lists them for the original
+        // Python implementation. The order only affects rounding in the MIE
+        // sums, but keeping it lets the legacy mode match bit for
+        // bit.
+        bat_list.sort_unstable();
     }
 
     bat_list.push(vec![bat.root[0], bat.root[1], bat.root[2]]);
@@ -772,6 +777,23 @@ pub enum BondSet {
     Tree,
 }
 
+/// How angles and torsions are evaluated from positions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Geometry {
+    /// Angles as atan2(|v1 x v2|, v1 . v2), accurate over the whole range and
+    /// never NaN for a straight angle; torsions with a correctly rounded
+    /// square root. See [`geometry::bond_angle`].
+    #[default]
+    Standard,
+    /// The arithmetic of the original Python implementation, so its
+    /// coordinates are reproduced bit for bit: angles as acos of the
+    /// normalized dot product, which differs by about 1e-8 rad and can give
+    /// NaN for a straight angle, and torsions with NumPy's `pow(x, 0.5)` in
+    /// place of `sqrt(x)`. See [`geometry::legacy_bond_angle`] and
+    /// [`geometry::legacy_torsion_angle`].
+    Legacy,
+}
+
 /// How a topology's internal coordinates are defined.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CoordinateOptions {
@@ -780,6 +802,7 @@ pub struct CoordinateOptions {
     /// torsion by its offset from that earlier one, a phase angle. See
     /// [`InternalCoordinates::phase_references`].
     pub phase_angles: bool,
+    pub geometry: Geometry,
 }
 
 pub struct InternalCoordinates {
@@ -949,12 +972,27 @@ impl InternalCoordinates {
             self.dim = self.bat_list.len();
             self.torsions_only = true;
         }
+        let legacy = self.options.geometry == Geometry::Legacy;
         if vartype == 5 {
             let coords = reader.read_coordinates_f32(frames, &self.atoms)?;
             self.int_coords = internal_coordinates_f32(&self.bat_list, &coords);
+            if legacy {
+                self.replace_legacy(
+                    &coords,
+                    geometry::legacy_bond_angle_f32,
+                    geometry::legacy_torsion_angle_f32,
+                );
+            }
         } else {
             let coords = reader.read_coordinates_f64(frames, &self.atoms)?;
             self.int_coords = internal_coordinates(&self.bat_list, &coords);
+            if legacy {
+                self.replace_legacy(
+                    &coords,
+                    geometry::legacy_bond_angle,
+                    geometry::legacy_torsion_angle,
+                );
+            }
         }
         if self.options.phase_angles {
             let references = self.phase_references();
@@ -967,6 +1005,26 @@ impl InternalCoordinates {
             }
         }
         Ok(())
+    }
+
+    /// Re-evaluates every angle and torsion with the legacy formulas.
+    fn replace_legacy<T, A, D>(&mut self, coords: &[Vec<[T; 3]>], angle: A, torsion: D)
+    where
+        T: Copy,
+        A: Fn([T; 3], [T; 3], [T; 3]) -> f64,
+        D: Fn([T; 3], [T; 3], [T; 3], [T; 3]) -> f64,
+    {
+        for (frame, positions) in self.int_coords.iter_mut().zip(coords) {
+            for (value, entry) in frame.iter_mut().zip(&self.bat_list) {
+                match entry[..] {
+                    [a, b, c] => *value = angle(positions[a], positions[b], positions[c]),
+                    [a, b, c, d] => {
+                        *value = torsion(positions[a], positions[b], positions[c], positions[d])
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     /// Topology atom indices of each coordinate: 2 for a bond, 3 for an angle

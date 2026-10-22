@@ -184,6 +184,7 @@ fn load(
     let options = CoordinateOptions {
         bonds,
         phase_angles,
+        ..Default::default()
     };
     let mut internal = InternalCoordinates::with_options(top, options).unwrap();
     internal

@@ -286,6 +286,7 @@ fn load_system(
             BondSet::HeavyAtom
         },
         phase_angles,
+        ..Default::default()
     };
     py.allow_threads(move || {
         system_from_trajectory(
