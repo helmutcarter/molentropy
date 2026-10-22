@@ -79,7 +79,7 @@ See [Validation](#validation) for how the estimators compare with thermodynamic 
 
 ## Validation
 
-The estimators have been checked against thermodynamic reference entropies: on the butane end states, BQH with phase angles agrees with thermodynamic integration within the reference's uncertainty. The `validation` page of the [API documentation](#documentation) has the results for every estimator and an example program that reproduces them.
+The estimators have been checked against thermodynamic reference entropies: on the butane end states, BQH with phase angles agrees with thermodynamic integration within the reference's uncertainty. The [validation page](https://helmutcarter.github.io/nn-entropy/nn_entropy/validation/index.html) of the API documentation has the results for every estimator and an example program that reproduces them.
 
 ## Legacy mode
 
@@ -218,7 +218,7 @@ Use a window when output is dense compared with the coordinates' correlation tim
 
 ## Documentation
 
-The Rust API is documented with rustdoc, including a guide to choosing an estimator and the validation results:
+The Rust API documentation, including a guide to choosing an estimator and the validation results, is published at <https://helmutcarter.github.io/nn-entropy/> for the current master. To build it locally:
 
 ```bash
 cargo doc --no-deps --open
