@@ -25,7 +25,7 @@ cargo build --release
 ## CLI usage
 
 ```bash
-cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered]
+cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered]
 ```
 
 Example:
@@ -43,7 +43,7 @@ Notes:
 - `--theiler-window W` excludes temporally adjacent frames from the nearest-neighbor search: frame i's neighbor must satisfy |i - j| > W, counted in frames after `--start` and `--stride`. The default, 0, is the plain estimator. See [Correlated frames](#correlated-frames-and-the-theiler-window).
 - `--exact-constant` uses the exact finite-sample term `psi(N) - psi(1) = H_(N-1)`. The default is the common approximation `ln(N) + EulerGamma`.
 - `--tree-bonds` uses the bonds of the BAT spanning tree, including bonds to hydrogen and excluding ring closures, in place of every heavy-atom bond. See [Coordinate sets](#coordinate-sets).
-- `--phase-angles` replaces each torsion that shares its central bond with an earlier torsion by its offset from that torsion. See [Coordinate sets](#coordinate-sets).
+- `--no-phase-angles` uses the raw torsions. By default each torsion that shares its central bond with an earlier torsion is replaced by its offset from that torsion. See [Coordinate sets](#coordinate-sets).
 - `--jacobian` also prints `Mean ln J = ...`, the mean of the log BAT Jacobian over the frames used, on the line before the entropy. It requires `--tree-bonds` and cannot be combined with `--torsions-only`.
 - `--legacy` reproduces the original Python implementation bit for bit. See [Legacy mode](#legacy-mode).
 - `--estimator` chooses the estimator: `nn` (the default) is the nearest-neighbor MIE, `qh` is quasi-harmonic, and `bqh` is Boltzmann quasi-harmonic. See [Quasi-harmonic estimators](#quasi-harmonic-estimators). `--mie-order` applies only to `nn`.
@@ -52,11 +52,11 @@ Notes:
 
 ## Coordinate sets
 
-By default, file-based calculations use every bond between two heavy atoms (ring closures included), plus the BAT tree's angles and torsions. Bonds to hydrogen are left out because they are usually constrained. Two options change this.
+By default, file-based calculations use every bond between two heavy atoms (ring closures included), plus the BAT tree's angles and torsions, with phase angles in place of redundant torsions. Bonds to hydrogen are left out because they are usually constrained.
 
 **Tree bonds** (`--tree-bonds`, `tree_bonds=True`, `BondSet::Tree`) use the bonds of the BAT spanning tree: the two root bonds and the bond that places each later atom, with hydrogens included and ring closures left out. Together with the angles and torsions, this gives exactly 3N - 6 non-redundant coordinates per molecule (one bond for a diatomic, including one with hydrogen). This is the coordinate set the BAT Jacobian is defined for.
 
-**Phase angles** (`--phase-angles`, `phase_angles=True`, `CoordinateOptions::phase_angles`) group the torsions by central bond. The first torsion about each bond, in coordinate order, keeps its value. Every later torsion about that bond is replaced by its offset from the first one, wrapped to (-π, π]. The offset is still a 2π-periodic coordinate. Because the map is a shear with unit Jacobian, the joint entropy of the full coordinate set is unchanged. A truncated MIE is not invariant, though. The raw torsions of atoms that rotate together, such as the three hydrogens of a methyl group, are strongly correlated, and a second-order expansion misses part of that correlation. Their offsets are stiff and nearly independent of the reference torsion, so less correlation is left beyond second order. Phase angles work with either bond set and with `--torsions-only`.
+**Phase angles** (on by default; `--no-phase-angles`, `phase_angles=False` or `CoordinateOptions::phase_angles` turn them off) group the torsions by central bond. The first torsion about each bond, in coordinate order, keeps its value. Every later torsion about that bond is replaced by its offset from the first one, wrapped to (-π, π]. The offset is still a 2π-periodic coordinate. Because the map is a shear with unit Jacobian, the joint entropy of the full coordinate set is unchanged. A truncated MIE is not invariant, though. The raw torsions of atoms that rotate together, such as the three hydrogens of a methyl group, are strongly correlated, and a second-order expansion misses part of that correlation. Their offsets are stiff and nearly independent of the reference torsion, so less correlation is left beyond second order. Every estimator in the crate does better with them; see [Validation](#validation). Phase angles work with either bond set and with `--torsions-only`.
 
 **The BAT Jacobian** (`--jacobian`, `System.mean_log_jacobian`, `InternalCoordinates::log_jacobian`) is ln J = Σ 2 ln b + Σ ln sin θ over the tree's bonds and angles. Adding its mean to the BAT entropy gives the entropy of the internal motion measured in Cartesian coordinates. Bond lengths are in the trajectory's units (Å for Amber), so ln J depends on that choice, just as the bond-length entropies do. Phase angles do not change it.
 
@@ -75,15 +75,24 @@ The covariance is the population covariance over the selected frames, so there m
 
 `--periodic-correlation centered` puts the centered and wrapped torsions into C as real coordinates instead. That is adequate for torsions confined to one narrow well, where both treatments agree, but a correlation between torsions that sweep the circle looks like a weak sawtooth after wrapping and is largely missed.
 
-On the butane 0.0 end state (10,000 frames), for comparison:
+See [Validation](#validation) for how the estimators compare against a thermodynamic reference.
 
-| | NN MIE-2 | QH | BQH |
-|---|---|---|---|
-| complex (default) | -23.9 | -3.9 | -5.7 |
-| centered | -23.9 | +5.2 | +3.3 |
-| complex, `--phase-angles` | -12.4 | -9.2 | -9.7 |
+## Validation
 
-The quasi-harmonic correlation term is a Gaussian approximation and is not invariant under a change of coordinates such as `--phase-angles`, so the estimators need not agree, and none of these numbers is a reference value.
+The butane end states of an alchemical transformation give an exact entropy difference to test against. State 0 has the torsion potentials switched off and state 1 is ordinary butane, both in the gas phase at 320 K with X-H bonds constrained. Thermodynamic integration and MBAR over 21 λ windows (3 replicates of 10 ns per window) give `T ΔS = ΔU - ΔA`, so `S0 - S1 = 14.32 ± 0.10` nats, with no density estimate involved. Masses do not change, so momentum entropy cancels, and the reference is a Cartesian configurational entropy: the BAT estimates below include `Δ⟨ln J⟩ = -0.06` nats. The default coordinate set is exactly the 26 unconstrained, nonredundant coordinates.
+
+`S0 - S1` in nats from one 10,000-frame trajectory per state, with the values from each half of the trajectories in parentheses:
+
+| estimator | phase angles (default) | raw torsions (`--no-phase-angles`) |
+|---|---|---|
+| NN MIE-2 | 11.33 (14.61, 13.38) | 17.14 (17.80, 19.72) |
+| QH | 12.97 (12.92, 13.05) | 13.11 (13.13, 13.30) |
+| BQH | **14.06** (13.85, 14.02) | 16.73 (16.67, 16.68) |
+| BQH, `--periodic-correlation centered` | 14.04 (13.83, 13.99) | 14.80 (14.79, 15.88) |
+
+BQH with phase angles is within 0.3 nats of the reference and stable across halves. QH misses because its Gaussian first-order term cannot represent the multiwell torsions of state 1. NN MIE-2 is noisy: summing many pairwise mutual informations accumulates estimator error that depends on N, so the full-trajectory value lies outside both halves. Without phase angles every estimator is worse, and the complex and centered treatments disagree.
+
+This is one system with one pair of trajectories, so it shows which estimators work here, not a general error bar.
 
 ## Legacy mode
 
@@ -94,7 +103,7 @@ The quasi-harmonic correlation term is a Gaussian approximation and is not invar
 - Angles use the script's `acos` formula (`Geometry::Legacy`), which can return NaN for a straight angle.
 - Torsions take |b2| as `pow(x, 0.5)`, as NumPy evaluates `x ** 0.5`, which is off by one ulp from `sqrt(x)` for about 1 in 1000 inputs.
 
-It cannot be combined with `--exact-constant`, `--theiler-window`, `--mie-order` other than 2, `--tree-bonds`, `--phase-angles` or `--jacobian`, because the script had none of them. `--torsions-only`, `--start`, `--stop` and `--stride` only choose the input and are allowed. The script's `N` argument corresponds to `--stop N`.
+It uses the raw torsions, as the script did, and cannot be combined with `--exact-constant`, `--theiler-window`, `--mie-order` other than 2, `--estimator` other than `nn`, `--tree-bonds`, `--phase-angles` or `--jacobian`, because the script had none of them. `--torsions-only`, `--start`, `--stop` and `--stride` only choose the input and are allowed. The script's `N` argument corresponds to `--stop N`.
 
 Atom selection is this crate's, which handles layouts the script did not (see [Interpretation and limitations](#interpretation-and-limitations)). The script took the first atoms of the trajectory and recognized water only by the types `OW`, `HW` and `EP`. On systems it handled correctly, both select the same atoms. Bit-for-bit agreement was checked with Python 3.12, NumPy 1.26, SciPy 1.13 and MDAnalysis 2.8 on seven trajectories: the test fixture, five cpptraj sample systems (up to 821 coordinates, including a solvated one), and two 10,000-frame butane end states. A different Python or NumPy version can change the script's result in the last bits. From Rust, the mode is `bat_library::Geometry::Legacy` for the coordinates and `legacy::legacy_entropy` for the estimator.
 
@@ -131,7 +140,7 @@ To build coordinates from files, use `bat_library::InternalCoordinates`:
 ```rust
 use nn_entropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
 
-let options = CoordinateOptions { bonds: BondSet::Tree, phase_angles: true, ..Default::default() };
+let options = CoordinateOptions { bonds: BondSet::Tree, ..Default::default() }; // phase angles by default
 let mut internal = InternalCoordinates::with_options(&top, options)?; // ::new(&top) for the defaults
 internal.calculate_internal_coords(&traj, usize::MAX, false)?;
 let metrics = internal.coordinate_metrics();   // one per coordinate
@@ -160,7 +169,7 @@ The result also carries the terms the totals are built from: `first_order_gaussi
 ## Python bindings
 
 The crate exposes a `nn_entropy` Python module (built from `src/pyo3_api.rs`) with:
-- `load_system(top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None, tree_bonds=False, phase_angles=False)`. See [Coordinate sets](#coordinate-sets).
+- `load_system(top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None, tree_bonds=False, phase_angles=True)`. See [Coordinate sets](#coordinate-sets).
 - `estimate_entropy(data_or_system, mie_order=None, periods=None, exact_constant=False, theiler_window=0)`. `mie_order` defaults to 2; `mie_order=1` gives the sum of the marginal entropies.
 - `estimate_coordinate_entropy(data_or_system, mie_order=None, periods=None, exact_constant=False, theiler_window=0)`. Returns each coordinate's share of the entropy; `mie_order` defaults to 2 and must be 1 or 2. The values sum to `estimate_entropy` at the same order.
 - `estimate_coordinate_mutual_information(data_or_system, periods=None, exact_constant=False, theiler_window=0)`. Returns the mutual information of each coordinate pair.
@@ -204,7 +213,7 @@ Threading note:
 - The reported value does not include a BAT-to-Cartesian Jacobian correction, momentum entropy, or a standard-state term, and must not be described as an absolute thermodynamic entropy. `--jacobian` reports the Jacobian term separately, for the tree bond set, but does not add it to the total.
 - Exact duplicate samples use the nearest distinct coordinate point. Many ties usually indicate inadequate coordinate precision or sampling and should be investigated.
 - MD frames are generally correlated. See below.
-- File-based results differ from the historical Python implementation because torsions are now periodic. Its asymptotic finite-sample convention is kept as the default. `--legacy` reproduces the historical results exactly.
+- File-based results differ from the historical Python implementation because torsions are now periodic and phase angles replace redundant torsions. Its asymptotic finite-sample convention is kept as the default. `--legacy` reproduces the historical results exactly.
 
 ## Correlated frames and the Theiler window
 

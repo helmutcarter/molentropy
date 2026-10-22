@@ -250,3 +250,43 @@ fn jacobian_without_the_tree_bond_set_is_rejected() {
         );
     }
 }
+
+#[test]
+fn phase_angles_are_the_default() {
+    let default = run_cli(&[]);
+    let explicit = run_cli(&["--phase-angles"]);
+    let raw = run_cli(&["--no-phase-angles"]);
+    assert!(default.status.success() && explicit.status.success() && raw.status.success());
+    assert_eq!(default.stdout, explicit.stdout);
+    assert_ne!(default.stdout, raw.stdout);
+
+    let top = fixture("tests/fixtures/test.parm7");
+    let traj = fixture("tests/fixtures/test.nc");
+    let options = CoordinateOptions {
+        phase_angles: false,
+        ..Default::default()
+    };
+    let mut internal = InternalCoordinates::with_options(&top, options).unwrap();
+    internal
+        .calculate_internal_coords(&traj, usize::MAX, false)
+        .unwrap();
+    let metrics = internal.coordinate_metrics();
+    let frames = internal.int_coords.len();
+    let mut data = vec![Vec::with_capacity(frames); metrics.len()];
+    for frame in internal.int_coords {
+        for (dimension, value) in frame.into_iter().enumerate() {
+            data[dimension].push(value);
+        }
+    }
+    let expected = calculate_entropy(
+        &data,
+        frames,
+        2,
+        &EntropyOptions {
+            metrics: Some(&metrics),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!((parse_entropy(&raw.stdout) - expected).abs() < 1e-12);
+}

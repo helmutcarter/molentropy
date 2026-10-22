@@ -19,7 +19,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered]",
             args[0]
         );
         std::process::exit(1);
@@ -28,7 +28,8 @@ fn main() {
     let traj_path = Path::new(&args[2]);
 
     let mut torsions_only = false;
-    let mut phase_angles = false;
+    // None until a flag sets it: phase angles are on unless --legacy.
+    let mut phase_angles: Option<bool> = None;
     let mut tree_bonds = false;
     let mut jacobian = false;
     let mut no_periodic = false;
@@ -50,7 +51,11 @@ fn main() {
                 i += 1;
             }
             "--phase-angles" => {
-                phase_angles = true;
+                phase_angles = Some(true);
+                i += 1;
+            }
+            "--no-phase-angles" => {
+                phase_angles = Some(false);
                 i += 1;
             }
             "--tree-bonds" => {
@@ -211,7 +216,7 @@ fn main() {
                 "--estimator other than nn",
             ),
             (tree_bonds, "--tree-bonds"),
-            (phase_angles, "--phase-angles"),
+            (phase_angles == Some(true), "--phase-angles"),
             (jacobian, "--jacobian"),
         ];
         for (given, flag) in conflicts {
@@ -228,7 +233,8 @@ fn main() {
         } else {
             BondSet::HeavyAtom
         },
-        phase_angles,
+        // The original Python implementation used the raw torsions.
+        phase_angles: phase_angles.unwrap_or(!legacy),
         geometry: if legacy {
             Geometry::Legacy
         } else {

@@ -175,8 +175,8 @@ def check_coordinate_options():
     fixtures = Path(__file__).resolve().parent / "fixtures"
     top, traj = str(fixtures / "test.parm7"), str(fixtures / "test.nc")
 
-    plain = nn_entropy.load_system(top, traj)
-    phase = nn_entropy.load_system(top, traj, phase_angles=True)
+    plain = nn_entropy.load_system(top, traj, phase_angles=False)
+    phase = nn_entropy.load_system(top, traj)  # phase angles are the default
     assert plain.coordinates == phase.coordinates
     changed = set()
     for index, (period, a, b) in enumerate(zip(plain.periods, plain.data, phase.data)):

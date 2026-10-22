@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use nn_entropy::bat_library::InternalCoordinates;
+use nn_entropy::bat_library::{CoordinateOptions, InternalCoordinates};
 use nn_entropy::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_entropy,
 };
@@ -13,13 +13,24 @@ fn test_data_path(rel: &str) -> PathBuf {
 // changed at about 1e-7 relative when bond angles moved from a float32 acos to
 // an f64 atan2 (the angles themselves moved by at most 6.5e-8 rad); with only
 // five frames, the nearest-neighbor sums magnify that rounding noise.
-fn one_d_data_from_fixture(torsions_only: bool) -> (Vec<Vec<f64>>, usize, Vec<CoordinateMetric>) {
+//
+// Most of them use the raw torsions, as they were pinned before phase angles
+// became the default; `default_entropy_matches_fixture_regression` pins the
+// default coordinates.
+fn one_d_data_from_fixture(
+    torsions_only: bool,
+    phase_angles: bool,
+) -> (Vec<Vec<f64>>, usize, Vec<CoordinateMetric>) {
     let top = test_data_path("tests/fixtures/test.parm7");
     let traj = test_data_path("tests/fixtures/test.nc");
     let frames = usize::MAX;
 
-    let mut internal =
-        InternalCoordinates::new(&top).expect("failed to build BAT list from topology");
+    let options = CoordinateOptions {
+        phase_angles,
+        ..Default::default()
+    };
+    let mut internal = InternalCoordinates::with_options(&top, options)
+        .expect("failed to build BAT list from topology");
     internal
         .calculate_internal_coords(&traj, frames, torsions_only)
         .expect("failed to read trajectory or compute BAT coordinates");
@@ -40,7 +51,7 @@ fn one_d_data_from_fixture(torsions_only: bool) -> (Vec<Vec<f64>>, usize, Vec<Co
 
 #[test]
 fn first_order_entropy_matches_periodic_fixture_regression() {
-    let (one_d_data, frame_count, metrics) = one_d_data_from_fixture(false);
+    let (one_d_data, frame_count, metrics) = one_d_data_from_fixture(false, false);
     let entropy = calculate_entropy(
         &one_d_data,
         frame_count,
@@ -61,7 +72,7 @@ fn first_order_entropy_matches_periodic_fixture_regression() {
 
 #[test]
 fn coordinate_first_order_entropy_sums_to_fixture_total() {
-    let (one_d_data, frame_count, metrics) = one_d_data_from_fixture(false);
+    let (one_d_data, frame_count, metrics) = one_d_data_from_fixture(false, false);
     let entropies = estimate_coordinate_entropy(
         &one_d_data,
         frame_count,
@@ -79,7 +90,7 @@ fn coordinate_first_order_entropy_sums_to_fixture_total() {
 
 #[test]
 fn second_order_entropy_matches_periodic_fixture_regression() {
-    let (one_d_data, frame_count, metrics) = one_d_data_from_fixture(false);
+    let (one_d_data, frame_count, metrics) = one_d_data_from_fixture(false, false);
     let entropy = calculate_entropy(
         &one_d_data,
         frame_count,
@@ -99,8 +110,9 @@ fn second_order_entropy_matches_periodic_fixture_regression() {
 }
 
 #[test]
-fn default_entropy_matches_second_order_reference_for_test_fixture() {
-    let (one_d_data, frame_count, metrics) = one_d_data_from_fixture(false);
+fn default_entropy_matches_fixture_regression() {
+    // Phase angles, the default coordinates.
+    let (one_d_data, frame_count, metrics) = one_d_data_from_fixture(false, true);
     let entropy = calculate_entropy(
         &one_d_data,
         frame_count,
@@ -111,7 +123,7 @@ fn default_entropy_matches_second_order_reference_for_test_fixture() {
         },
     )
     .expect("entropy calculation failed");
-    let expected = -130.4973107281728_f64;
+    let expected = -126.95879255818954_f64;
     let diff = (entropy - expected).abs();
     assert!(
         diff < 1e-9,
@@ -121,7 +133,7 @@ fn default_entropy_matches_second_order_reference_for_test_fixture() {
 
 #[test]
 fn torsions_only_entropy_matches_reference_for_test_fixture() {
-    let (one_d_data, frame_count, metrics) = one_d_data_from_fixture(true);
+    let (one_d_data, frame_count, metrics) = one_d_data_from_fixture(true, false);
     let entropy = calculate_entropy(
         &one_d_data,
         frame_count,
