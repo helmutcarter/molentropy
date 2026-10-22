@@ -79,20 +79,24 @@ See [Validation](#validation) for how the estimators compare against a thermodyn
 
 ## Validation
 
-The butane end states of an alchemical transformation give an exact entropy difference to test against. State 0 has the torsion potentials switched off and state 1 is ordinary butane, both in the gas phase at 320 K with X-H bonds constrained. Thermodynamic integration and MBAR over 21 λ windows (3 replicates of 10 ns per window) give `T ΔS = ΔU - ΔA`, so `S0 - S1 = 14.32 ± 0.10` nats, with no density estimate involved. Masses do not change, so momentum entropy cancels, and the reference is a Cartesian configurational entropy: the BAT estimates below include `Δ⟨ln J⟩ = -0.06` nats. The default coordinate set is exactly the 26 unconstrained, nonredundant coordinates.
+The butane end states of an alchemical transformation give an exact entropy difference to test against. State 0 has the bonded potentials of state 1 with the torsion terms switched off; state 1 is ordinary butane. Both were simulated in the gas phase at 320 K with X-H bonds constrained (OpenMM, Langevin, 10,000 frames per end state). Thermodynamic integration and MBAR over 21 λ windows of 10 ns give `T ΔS = ΔU - ΔA` for each of three independent replicates, with no density estimate involved. Masses do not change, so momentum entropy cancels, and the reference is a Cartesian configurational entropy: the BAT estimates below include `Δ⟨ln J⟩`, about -0.06 nats. The default coordinate set is exactly the 26 unconstrained, nonredundant coordinates.
 
-`S0 - S1` in nats from one 10,000-frame trajectory per state, with the values from each half of the trajectories in parentheses:
+`S0 - S1` in nats, estimated from each replicate's end-state trajectories:
 
-| estimator | phase angles (default) | raw torsions (`--no-phase-angles`) |
-|---|---|---|
-| NN MIE-2 | 11.33 (14.61, 13.38) | 17.14 (17.80, 19.72) |
-| QH | 12.97 (12.92, 13.05) | 13.11 (13.13, 13.30) |
-| BQH | **14.06** (13.85, 14.02) | 16.73 (16.67, 16.68) |
-| BQH, `--periodic-correlation centered` | 14.04 (13.83, 13.99) | 14.80 (14.79, 15.88) |
+| estimator | rep 1 | rep 2 | rep 3 | mean error | RMSE |
+|---|---|---|---|---|---|
+| reference (TI/MBAR) | 14.219 | 14.429 | 14.325 | | |
+| **BQH** | 14.238 | 14.480 | 14.348 | **+0.031** | **0.034** |
+| BQH, `--periodic-correlation centered` | 14.214 | 14.459 | 14.327 | +0.009 | 0.018 |
+| BQH, `--histogram-bins 100` | 14.165 | 14.340 | 14.226 | -0.081 | 0.083 |
+| NN MIE-2 | 14.541 | 13.950 | 14.160 | -0.107 | 0.346 |
+| QH | 13.388 | 13.505 | 13.408 | -0.891 | 0.892 |
+| NN MIE-2, `--no-phase-angles` | 16.314 | 15.446 | 17.879 | +2.222 | 2.453 |
+| BQH, `--no-phase-angles` | 17.189 | 17.446 | 17.147 | +2.936 | 2.938 |
 
-BQH with phase angles is within 0.3 nats of the reference and stable across halves. QH misses because its Gaussian first-order term cannot represent the multiwell torsions of state 1. NN MIE-2 is noisy: summing many pairwise mutual informations accumulates estimator error that depends on N, so the full-trajectory value lies outside both halves. Without phase angles every estimator is worse, and the complex and centered treatments disagree.
+BQH with phase angles agrees with the reference within the reference's own uncertainty (about 0.08 nats per replicate) and follows its replicate-to-replicate variation. QH misses by 0.9 nats because its Gaussian first-order term cannot represent the multiwell torsions of state 1. NN MIE-2 is unbiased on average but varies by ±0.4 nats between replicates, because summing many pairwise mutual informations accumulates estimator error. Without phase angles every estimator is off by 0.4 to 3.7 nats; the redundant torsions of the methyl rotors are the cause.
 
-This is one system with one pair of trajectories, so it shows which estimators work here, not a general error bar.
+This is one small molecule, so it shows which estimators work here, not a general error bar. The complex and centered treatments agree here because, with phase angles, only four torsions remain free and their correlations are weak; they differ when strongly correlated torsions sweep the circle, as the raw methyl torsions do.
 
 ## Legacy mode
 
