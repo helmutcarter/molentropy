@@ -795,14 +795,28 @@ pub enum Geometry {
 }
 
 /// How a topology's internal coordinates are defined.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+///
+/// The default is heavy-atom bonds, phase angles and the standard geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoordinateOptions {
     pub bonds: BondSet,
     /// Replace each torsion that shares its central bond with an earlier
     /// torsion by its offset from that earlier one, a phase angle. See
-    /// [`InternalCoordinates::phase_references`].
+    /// [`InternalCoordinates::phase_references`]. On by default: the raw
+    /// torsions of atoms that rotate together, such as a methyl group's
+    /// hydrogens, are redundant, and every estimator does worse on them.
     pub phase_angles: bool,
     pub geometry: Geometry,
+}
+
+impl Default for CoordinateOptions {
+    fn default() -> Self {
+        Self {
+            bonds: BondSet::default(),
+            phase_angles: true,
+            geometry: Geometry::default(),
+        }
+    }
 }
 
 pub struct InternalCoordinates {

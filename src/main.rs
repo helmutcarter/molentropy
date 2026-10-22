@@ -3,13 +3,23 @@ use std::path::Path;
 
 use nn_entropy::bat_library::{BondSet, CoordinateOptions, Geometry, InternalCoordinates};
 use nn_entropy::legacy::legacy_entropy;
+use nn_entropy::quasi_harmonic::{
+    MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions, estimate_quasi_harmonic_entropy,
+};
 use nn_entropy::{CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Estimator {
+    NearestNeighbor,
+    QuasiHarmonic,
+    BoltzmannQuasiHarmonic,
+}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--phase-angles] [--jacobian] [--legacy]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered]",
             args[0]
         );
         std::process::exit(1);
@@ -18,7 +28,8 @@ fn main() {
     let traj_path = Path::new(&args[2]);
 
     let mut torsions_only = false;
-    let mut phase_angles = false;
+    // None until a flag sets it: phase angles are on unless --legacy.
+    let mut phase_angles: Option<bool> = None;
     let mut tree_bonds = false;
     let mut jacobian = false;
     let mut no_periodic = false;
@@ -26,6 +37,9 @@ fn main() {
     let mut start: Option<usize> = None;
     let mut stop: Option<usize> = None;
     let mut legacy = false;
+    let mut estimator = Estimator::NearestNeighbor;
+    let mut histogram_bins: Option<usize> = None;
+    let mut periodic_correlation: Option<PeriodicCorrelation> = None;
     let mut mie_order = 2;
     let mut stride = 1usize;
     let mut theiler_window = 0usize;
@@ -37,7 +51,11 @@ fn main() {
                 i += 1;
             }
             "--phase-angles" => {
-                phase_angles = true;
+                phase_angles = Some(true);
+                i += 1;
+            }
+            "--no-phase-angles" => {
+                phase_angles = Some(false);
                 i += 1;
             }
             "--tree-bonds" => {
@@ -106,6 +124,51 @@ fn main() {
                 legacy = true;
                 i += 1;
             }
+            "--estimator" => {
+                if i + 1 >= args.len() {
+                    eprintln!("--estimator requires a value");
+                    std::process::exit(1);
+                }
+                estimator = match args[i + 1].as_str() {
+                    "nn" => Estimator::NearestNeighbor,
+                    "qh" => Estimator::QuasiHarmonic,
+                    "bqh" => Estimator::BoltzmannQuasiHarmonic,
+                    other => {
+                        eprintln!("--estimator must be nn, qh or bqh, got {other}");
+                        std::process::exit(1);
+                    }
+                };
+                i += 2;
+            }
+            "--periodic-correlation" => {
+                if i + 1 >= args.len() {
+                    eprintln!("--periodic-correlation requires a value");
+                    std::process::exit(1);
+                }
+                periodic_correlation = Some(match args[i + 1].as_str() {
+                    "complex" => PeriodicCorrelation::Complex,
+                    "centered" => PeriodicCorrelation::Centered,
+                    other => {
+                        eprintln!(
+                            "--periodic-correlation must be complex or centered, got {other}"
+                        );
+                        std::process::exit(1);
+                    }
+                });
+                i += 2;
+            }
+            "--histogram-bins" => {
+                if i + 1 >= args.len() {
+                    eprintln!("--histogram-bins requires a value");
+                    std::process::exit(1);
+                }
+                histogram_bins = Some(
+                    args[i + 1]
+                        .parse::<usize>()
+                        .expect("invalid --histogram-bins value"),
+                );
+                i += 2;
+            }
             other => {
                 eprintln!("Unknown argument: {other}");
                 std::process::exit(1);
@@ -125,6 +188,22 @@ fn main() {
         std::process::exit(1);
     }
 
+    if estimator != Estimator::NearestNeighbor && mie_order != 2 {
+        eprintln!("--mie-order applies only to --estimator nn");
+        std::process::exit(1);
+    }
+    if histogram_bins.is_some() && estimator != Estimator::BoltzmannQuasiHarmonic {
+        eprintln!("--histogram-bins applies only to --estimator bqh");
+        std::process::exit(1);
+    }
+    if periodic_correlation.is_some() && estimator == Estimator::NearestNeighbor {
+        eprintln!("--periodic-correlation applies only to --estimator qh or bqh");
+        std::process::exit(1);
+    }
+    if histogram_bins == Some(0) {
+        eprintln!("--histogram-bins must be at least 1");
+        std::process::exit(1);
+    }
     if legacy {
         // The original Python estimator had none of these; each would make the
         // result differ from it.
@@ -132,8 +211,12 @@ fn main() {
             (exact_constant, "--exact-constant"),
             (theiler_window != 0, "--theiler-window"),
             (mie_order != 2, "--mie-order other than 2"),
+            (
+                estimator != Estimator::NearestNeighbor,
+                "--estimator other than nn",
+            ),
             (tree_bonds, "--tree-bonds"),
-            (phase_angles, "--phase-angles"),
+            (phase_angles == Some(true), "--phase-angles"),
             (jacobian, "--jacobian"),
         ];
         for (given, flag) in conflicts {
@@ -150,7 +233,8 @@ fn main() {
         } else {
             BondSet::HeavyAtom
         },
-        phase_angles,
+        // The original Python implementation used the raw torsions.
+        phase_angles: phase_angles.unwrap_or(!legacy),
         geometry: if legacy {
             Geometry::Legacy
         } else {
@@ -211,10 +295,26 @@ fn main() {
         constant,
         theiler_window,
     };
-    let result = if legacy {
-        legacy_entropy(&one_d_data, used_frames)
-    } else {
-        calculate_entropy(&one_d_data, used_frames, mie_order, &options)
+    let quasi_harmonic = QuasiHarmonicOptions {
+        marginals: match histogram_bins {
+            Some(bins) => MarginalEstimator::Histogram { bins },
+            None => MarginalEstimator::NearestNeighbor,
+        },
+        periodic: periodic_correlation.unwrap_or_default(),
+    };
+    let result = match estimator {
+        _ if legacy => legacy_entropy(&one_d_data, used_frames),
+        Estimator::NearestNeighbor => {
+            calculate_entropy(&one_d_data, used_frames, mie_order, &options)
+        }
+        Estimator::QuasiHarmonic => {
+            estimate_quasi_harmonic_entropy(&one_d_data, used_frames, &quasi_harmonic, &options)
+                .map(|entropy| entropy.quasi_harmonic)
+        }
+        Estimator::BoltzmannQuasiHarmonic => {
+            estimate_quasi_harmonic_entropy(&one_d_data, used_frames, &quasi_harmonic, &options)
+                .map(|entropy| entropy.boltzmann_quasi_harmonic)
+        }
     };
     let entropy = match result {
         Ok(value) => value,

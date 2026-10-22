@@ -58,6 +58,7 @@ fn cli_reproduces_the_python_implementation_bit_for_bit() {
 fn library_reproduces_the_python_implementation_bit_for_bit() {
     let options = CoordinateOptions {
         geometry: Geometry::Legacy,
+        phase_angles: false,
         ..Default::default()
     };
     let mut internal =
