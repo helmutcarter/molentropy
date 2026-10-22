@@ -10,7 +10,8 @@ use std::f64::consts::{E, PI, TAU};
 
 use common::{Rng, bivariate_normal_entropy, normal_entropy};
 use nn_entropy::quasi_harmonic::{
-    MarginalEstimator, PeriodicCorrelation, QuasiHarmonicEntropy, QuasiHarmonicOptions,
+    CoordinateQuasiHarmonicEntropy, MarginalEstimator, PeriodicCorrelation, QuasiHarmonicEntropy,
+    QuasiHarmonicOptions, estimate_coordinate_quasi_harmonic_entropy,
     estimate_quasi_harmonic_entropy,
 };
 use nn_entropy::{CoordinateMetric, EntropyOptions, estimate_coordinate_entropy};
@@ -523,6 +524,176 @@ fn rotating_each_torsion_leaves_the_complex_correlation_unchanged() {
 }
 
 // ---------------------------------------------------------------------------
+// Per-coordinate shares
+// ---------------------------------------------------------------------------
+
+fn per_coordinate(
+    data: &[Vec<f64>],
+    metrics: &[CoordinateMetric],
+    quasi_harmonic: QuasiHarmonicOptions,
+) -> (CoordinateQuasiHarmonicEntropy, QuasiHarmonicEntropy) {
+    let options = EntropyOptions {
+        metrics: Some(metrics),
+        ..Default::default()
+    };
+    let n = data[0].len();
+    (
+        estimate_coordinate_quasi_harmonic_entropy(data, n, &quasi_harmonic, &options).unwrap(),
+        estimate_quasi_harmonic_entropy(data, n, &quasi_harmonic, &options).unwrap(),
+    )
+}
+
+/// Two correlated normals, a rotor pair of torsions, and an exponential.
+fn mixed_system(rng: &mut Rng, n: usize) -> (Vec<Vec<f64>>, Vec<CoordinateMetric>) {
+    let (x, y) = rng.correlated_normal_pair(n, 0.6);
+    let phi = rng.uniform_vec(n, -PI, PI);
+    let psi: Vec<f64> = phi
+        .iter()
+        .zip(&x)
+        .map(|(p, x)| wrap(p + TAU / 3.0 + 0.2 * rng.normal() + 0.1 * x))
+        .collect();
+    let z = rng.exponential_vec(n, 2.0);
+    let metrics = vec![
+        CoordinateMetric::Linear,
+        CoordinateMetric::Linear,
+        TORSION,
+        TORSION,
+        CoordinateMetric::Linear,
+    ];
+    (vec![x, y, phi, psi, z], metrics)
+}
+
+#[test]
+fn per_coordinate_shares_sum_to_the_totals() {
+    let mut rng = Rng::new(41);
+    let (data, metrics) = mixed_system(&mut rng, 8_000);
+    for quasi_harmonic in [
+        QuasiHarmonicOptions::default(),
+        QuasiHarmonicOptions {
+            marginals: MarginalEstimator::Histogram { bins: 50 },
+            periodic: PeriodicCorrelation::Centered,
+        },
+    ] {
+        let (shares, totals) = per_coordinate(&data, &metrics, quasi_harmonic);
+        let sum = |values: &[f64]| values.iter().sum::<f64>();
+        assert_close(
+            sum(&shares.quasi_harmonic),
+            totals.quasi_harmonic,
+            1e-9,
+            "QH",
+        );
+        assert_close(
+            sum(&shares.boltzmann_quasi_harmonic),
+            totals.boltzmann_quasi_harmonic,
+            1e-9,
+            "BQH",
+        );
+        assert_close(
+            sum(&shares.correlation),
+            totals.correlation,
+            1e-9,
+            "correlation",
+        );
+        assert_eq!(
+            sum(&shares.first_order_gaussian),
+            totals.first_order_gaussian
+        );
+        assert_eq!(
+            sum(&shares.first_order_boltzmann),
+            totals.first_order_boltzmann
+        );
+        assert!(shares.correlation.iter().all(|&share| share <= 1e-12));
+    }
+}
+
+#[test]
+fn two_coordinates_split_the_correlation_evenly() {
+    // C = [[1, rho], [rho*, 1]] has eigenvalues 1 +- |rho| with eigenvectors of
+    // equal weight, so (log C)_ii = 1/2 ln(1 - |rho|^2) for both coordinates.
+    let mut rng = Rng::new(42);
+    let (x, y) = rng.correlated_normal_pair(5_000, 0.7);
+    let linear = [CoordinateMetric::Linear, CoordinateMetric::Linear];
+    let (shares, _) = per_coordinate(&[x.clone(), y.clone()], &linear, Default::default());
+    let r = covariance(&x, &y) / (covariance(&x, &x) * covariance(&y, &y)).sqrt();
+    for share in &shares.correlation {
+        assert_close(*share, 0.25 * (1.0 - r * r).ln(), 1e-12, "real pair");
+    }
+
+    let phi1 = rng.uniform_vec(5_000, -PI, PI);
+    let phi2: Vec<f64> = phi1
+        .iter()
+        .map(|p| wrap(p + 2.0 + 0.3 * rng.normal()))
+        .collect();
+    let (shares, _) = per_coordinate(
+        &[phi1.clone(), phi2.clone()],
+        &[TORSION, TORSION],
+        Default::default(),
+    );
+    let rho = coefficient(&deviations(&phi1, true), &deviations(&phi2, true));
+    for share in &shares.correlation {
+        assert_close(
+            *share,
+            0.25 * (1.0 - norm_sqr(rho)).ln(),
+            1e-12,
+            "rotor pair",
+        );
+    }
+}
+
+#[test]
+fn shares_follow_their_coordinates_when_relabelled() {
+    let mut rng = Rng::new(43);
+    let (data, metrics) = mixed_system(&mut rng, 4_000);
+    let (shares, _) = per_coordinate(&data, &metrics, Default::default());
+    let order = [3, 0, 4, 2, 1];
+    let permuted: Vec<Vec<f64>> = order.iter().map(|&i| data[i].clone()).collect();
+    let permuted_metrics: Vec<CoordinateMetric> = order.iter().map(|&i| metrics[i]).collect();
+    let (moved, _) = per_coordinate(&permuted, &permuted_metrics, Default::default());
+    for (position, &original) in order.iter().enumerate() {
+        assert_close(
+            moved.correlation[position],
+            shares.correlation[original],
+            1e-10,
+            "correlation share",
+        );
+    }
+}
+
+#[test]
+fn an_independent_coordinate_takes_no_correlation_share() {
+    let mut rng = Rng::new(44);
+    let (x, y) = rng.correlated_normal_pair(50_000, 0.8);
+    let z = rng.normal_vec(50_000, 0.0, 1.0);
+    let linear = [CoordinateMetric::Linear; 3];
+    let (shares, _) = per_coordinate(&[x, y, z], &linear, Default::default());
+    // Each of x and y takes about 1/4 ln(1 - 0.64) = -0.255.
+    assert!(shares.correlation[0] < -0.2 && shares.correlation[1] < -0.2);
+    assert!(shares.correlation[2] > -1e-3, "{}", shares.correlation[2]);
+}
+
+#[test]
+fn first_order_shares_are_the_single_coordinate_estimates() {
+    let mut rng = Rng::new(45);
+    let (data, metrics) = mixed_system(&mut rng, 3_000);
+    let (shares, _) = per_coordinate(&data, &metrics, Default::default());
+    let options = EntropyOptions {
+        metrics: Some(&metrics),
+        ..Default::default()
+    };
+    let marginals = estimate_coordinate_entropy(&data, 3_000, 1, &options).unwrap();
+    assert_eq!(shares.first_order_boltzmann, marginals);
+    for i in [0, 1, 4] {
+        let variance = covariance(&data[i], &data[i]);
+        assert_close(
+            shares.first_order_gaussian[i],
+            0.5 * (TAU * E * variance).ln(),
+            1e-12,
+            "Gaussian first order",
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 
@@ -626,9 +797,12 @@ mod cli {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        // The total is always the last line.
         String::from_utf8_lossy(&output.stdout)
             .trim()
-            .strip_prefix("Total entropy = ")
+            .lines()
+            .last()
+            .and_then(|line| line.strip_prefix("Total entropy = "))
             .expect("missing entropy output")
             .parse()
             .unwrap()
@@ -753,6 +927,89 @@ mod cli {
                 &["--estimator", "qh", "--periodic-correlation", flag],
             );
             assert_eq!(entropy(&output), expected.quasi_harmonic, "{flag}");
+        }
+    }
+
+    /// The rows of `--per-coordinate` output: (type, atoms, entropy).
+    fn table(output: &Output) -> Vec<(String, String, f64)> {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut lines = stdout.lines();
+        assert_eq!(lines.next(), Some("coordinate\ttype\tatoms\tentropy"));
+        lines
+            .take_while(|line| !line.contains('='))
+            .enumerate()
+            .map(|(index, line)| {
+                let fields: Vec<&str> = line.split('\t').collect();
+                assert_eq!(fields[0], (index + 1).to_string());
+                (
+                    fields[1].to_string(),
+                    fields[2].to_string(),
+                    fields[3].parse().unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn per_coordinate_tables_sum_to_the_total() {
+        let (top, traj) = chain_system("cli_per_coordinate");
+        let internal = {
+            let mut internal = InternalCoordinates::new(&top).unwrap();
+            internal
+                .calculate_internal_coords(&traj, usize::MAX, false)
+                .unwrap();
+            internal
+        };
+        for args in [
+            &["--estimator", "bqh", "--per-coordinate"][..],
+            &["--estimator", "qh", "--per-coordinate"][..],
+            &["--per-coordinate"][..],
+            &["--per-coordinate", "--mie-order", "1"][..],
+        ] {
+            let output = run(&top, &traj, args);
+            let rows = table(&output);
+            assert_eq!(rows.len(), internal.dim, "{args:?}");
+            let sum: f64 = rows.iter().map(|row| row.2).sum();
+            assert!(
+                (sum - entropy(&output)).abs() < 1e-9,
+                "{args:?}: {sum} vs {}",
+                entropy(&output)
+            );
+        }
+
+        // Types and 1-based atoms follow the coordinates.
+        let rows = table(&run(&top, &traj, &["--per-coordinate"]));
+        let references = internal.phase_references();
+        for (index, (atoms, row)) in internal.coordinate_atoms().iter().zip(&rows).enumerate() {
+            let kind = match atoms.len() {
+                2 => "bond",
+                3 => "angle",
+                _ if references[index].is_some() => "phase angle",
+                _ => "torsion",
+            };
+            assert_eq!(row.0, kind);
+            let numbered: Vec<String> = atoms.iter().map(|a| (a + 1).to_string()).collect();
+            assert_eq!(row.1, numbered.join("-"));
+        }
+    }
+
+    #[test]
+    fn per_coordinate_rejects_what_it_cannot_split() {
+        let (top, traj) = chain_system("cli_per_coordinate_rejected");
+        for (args, message) in [
+            (
+                &["--per-coordinate", "--mie-order", "3"][..],
+                "--mie-order 1 or 2",
+            ),
+            (
+                &["--per-coordinate", "--legacy"][..],
+                "--per-coordinate cannot be combined",
+            ),
+        ] {
+            let output = run(&top, &traj, args);
+            assert!(!output.status.success(), "{args:?} should fail");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains(message), "{args:?}: {stderr}");
         }
     }
 }

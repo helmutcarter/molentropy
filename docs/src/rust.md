@@ -65,4 +65,4 @@ let entropy = estimate_quasi_harmonic_entropy(&one_d_data, frames_end, &quasi_ha
 println!("QH {} BQH {}", entropy.quasi_harmonic, entropy.boltzmann_quasi_harmonic);
 ```
 
-The result also carries the terms the totals are built from: `first_order_gaussian`, `first_order_boltzmann` and `correlation`.
+The result also carries the terms the totals are built from: `first_order_gaussian`, `first_order_boltzmann` and `correlation`. `estimate_coordinate_quasi_harmonic_entropy` takes the same arguments and returns each coordinate's share of every one of them.

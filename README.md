@@ -7,7 +7,7 @@ Estimate the configurational entropy of a molecular system, with a Rust library,
 The crate converts Amber trajectories to internal coordinates (bond lengths, bond angles, and torsions) and estimates their entropy. File-based calculations use linear metrics for bonds and angles and a 2π-periodic metric for torsions.
 
 ## Features
-- Estimators: the nearest-neighbor mutual information expansion (NN MIE) up to fourth order, with per-coordinate entropies and pairwise mutual information; quasi-harmonic (QH) and Boltzmann quasi-harmonic (BQH) entropy.
+- Estimators: the nearest-neighbor mutual information expansion (NN MIE) up to fourth order, with pairwise mutual information; quasi-harmonic (QH) and Boltzmann quasi-harmonic (BQH) entropy. Each can also report every coordinate's share of the entropy.
 - Validated against thermodynamic reference entropies; see [Validation](https://helmutcarter.github.io/nn-entropy/validation.html).
 - A CLI that reads `.parm7` + `.nc`, a Rust library, and Python bindings via `pyo3` for in-memory arrays or file-based calculation.
 - A [user guide](https://helmutcarter.github.io/nn-entropy/) covering the CLI, Python and Rust interfaces and the methods.

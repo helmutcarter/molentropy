@@ -4,9 +4,13 @@ use std::path::Path;
 use nn_entropy::bat_library::{BondSet, CoordinateOptions, Geometry, InternalCoordinates};
 use nn_entropy::legacy::legacy_entropy;
 use nn_entropy::quasi_harmonic::{
-    MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions, estimate_quasi_harmonic_entropy,
+    MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions,
+    estimate_coordinate_quasi_harmonic_entropy, estimate_quasi_harmonic_entropy,
 };
-use nn_entropy::{CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy};
+use nn_entropy::{
+    CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy,
+    estimate_coordinate_entropy,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Estimator {
@@ -19,7 +23,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate]",
             args[0]
         );
         std::process::exit(1);
@@ -39,6 +43,7 @@ fn main() {
     let mut legacy = false;
     let mut estimator = Estimator::NearestNeighbor;
     let mut histogram_bins: Option<usize> = None;
+    let mut per_coordinate = false;
     let mut periodic_correlation: Option<PeriodicCorrelation> = None;
     let mut mie_order = 2;
     let mut stride = 1usize;
@@ -140,6 +145,10 @@ fn main() {
                 };
                 i += 2;
             }
+            "--per-coordinate" => {
+                per_coordinate = true;
+                i += 1;
+            }
             "--periodic-correlation" => {
                 if i + 1 >= args.len() {
                     eprintln!("--periodic-correlation requires a value");
@@ -200,6 +209,10 @@ fn main() {
         eprintln!("--periodic-correlation applies only to --estimator qh or bqh");
         std::process::exit(1);
     }
+    if per_coordinate && estimator == Estimator::NearestNeighbor && mie_order > 2 {
+        eprintln!("--per-coordinate supports --mie-order 1 or 2");
+        std::process::exit(1);
+    }
     if histogram_bins == Some(0) {
         eprintln!("--histogram-bins must be at least 1");
         std::process::exit(1);
@@ -218,6 +231,7 @@ fn main() {
             (tree_bonds, "--tree-bonds"),
             (phase_angles == Some(true), "--phase-angles"),
             (jacobian, "--jacobian"),
+            (per_coordinate, "--per-coordinate"),
         ];
         for (given, flag) in conflicts {
             if given {
@@ -323,6 +337,51 @@ fn main() {
             std::process::exit(1);
         }
     };
+    if per_coordinate {
+        let values = match estimator {
+            Estimator::NearestNeighbor => {
+                estimate_coordinate_entropy(&one_d_data, used_frames, mie_order, &options)
+            }
+            Estimator::QuasiHarmonic => estimate_coordinate_quasi_harmonic_entropy(
+                &one_d_data,
+                used_frames,
+                &quasi_harmonic,
+                &options,
+            )
+            .map(|entropy| entropy.quasi_harmonic),
+            Estimator::BoltzmannQuasiHarmonic => estimate_coordinate_quasi_harmonic_entropy(
+                &one_d_data,
+                used_frames,
+                &quasi_harmonic,
+                &options,
+            )
+            .map(|entropy| entropy.boltzmann_quasi_harmonic),
+        };
+        let values = match values {
+            Ok(values) => values,
+            Err(err) => {
+                eprintln!("Per-coordinate entropy calculation failed: {err}");
+                std::process::exit(1);
+            }
+        };
+        let references = internal.phase_references();
+        println!("coordinate\ttype\tatoms\tentropy");
+        for (index, (atoms, value)) in internal.coordinate_atoms().iter().zip(&values).enumerate() {
+            let kind = match atoms.len() {
+                2 => "bond",
+                3 => "angle",
+                _ if references[index].is_some() => "phase angle",
+                _ => "torsion",
+            };
+            // Atoms are numbered from 1, as in Amber and cpptraj.
+            let atoms = atoms
+                .iter()
+                .map(|atom| (atom + 1).to_string())
+                .collect::<Vec<_>>()
+                .join("-");
+            println!("{}\t{kind}\t{atoms}\t{value}", index + 1);
+        }
+    }
     if jacobian {
         // Over the same frames the entropy used.
         let log_jacobian = internal

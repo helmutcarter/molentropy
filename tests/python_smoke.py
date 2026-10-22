@@ -31,6 +31,7 @@ EXPECTED_EXPORTS = {
     "estimate_coordinate_entropy",
     "estimate_coordinate_mutual_information",
     "estimate_quasi_harmonic_entropy",
+    "estimate_coordinate_quasi_harmonic_entropy",
 }
 
 
@@ -215,6 +216,13 @@ def check_quasi_harmonic():
     assert abs(got["correlation"] - 0.5 * math.log(1 - r * r)) < 1e-10, got
     assert got["boltzmann_quasi_harmonic"] == got["first_order_boltzmann"] + got["correlation"]
 
+    shares = nn_entropy.estimate_coordinate_quasi_harmonic_entropy(data)
+    assert set(shares) == set(got), shares.keys()
+    for key, values in shares.items():
+        assert len(values) == 2 and abs(sum(values) - got[key]) < 1e-9, (key, values, got[key])
+    # Two coordinates split the correlation term evenly.
+    assert abs(shares["correlation"][0] - shares["correlation"][1]) < 1e-12, shares
+
     histogram = nn_entropy.estimate_quasi_harmonic_entropy(data, histogram_bins=50)
     assert histogram["quasi_harmonic"] == got["quasi_harmonic"]
     assert histogram["first_order_boltzmann"] != got["first_order_boltzmann"]
@@ -244,12 +252,13 @@ def check_quasi_harmonic():
     # The fixture has 5 frames and 29 coordinates: too few for a correlation matrix.
     fixtures = Path(__file__).resolve().parent / "fixtures"
     system = nn_entropy.load_system(str(fixtures / "test.parm7"), str(fixtures / "test.nc"))
-    try:
-        system.estimate_quasi_harmonic_entropy()
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("5 frames of 29 coordinates should be rejected")
+    for method in (system.estimate_quasi_harmonic_entropy, system.estimate_coordinate_quasi_harmonic_entropy):
+        try:
+            method()
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{method.__name__}: 5 frames of 29 coordinates should be rejected")
     print(f"quasi-harmonic: QH {got['quasi_harmonic']!r}, BQH {got['boltzmann_quasi_harmonic']!r}")
 
 
