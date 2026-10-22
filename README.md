@@ -218,7 +218,7 @@ Use a window when output is dense compared with the coordinates' correlation tim
 
 ## Documentation
 
-The Rust API documentation, including a guide to choosing an estimator and the validation results, is published at <https://helmutcarter.github.io/nn-entropy/> for the current master. To build it locally:
+The Rust API documentation, including a guide to choosing an estimator and the validation results, is published at <https://helmutcarter.github.io/nn-entropy/> for the current main branch. To build it locally:
 
 ```bash
 cargo doc --no-deps --open

@@ -1,9 +1,9 @@
 name: Docs site
 
-# Publishes the rustdoc for master to GitHub Pages.
+# Publishes the rustdoc for main to GitHub Pages.
 on:
   push:
-    branches: [master]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
