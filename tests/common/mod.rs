@@ -12,8 +12,7 @@ use nn_entropy::CoordinateMetric;
 
 pub mod amber;
 
-/// Euler-Mascheroni constant, to the precision the crate itself uses.
-pub const EULER_MASCHERONI: f64 = 0.57721566490153;
+pub const EULER_MASCHERONI: f64 = std::f64::consts::EULER_GAMMA;
 
 // ---------------------------------------------------------------------------
 // Deterministic sampling
@@ -152,7 +151,7 @@ pub fn unit_ball_volume(dimensions: usize) -> f64 {
     }
 }
 
-/// `ln(V_d) + ln(N) + gamma`, the crate's default (Python-compatible) constant.
+/// `ln(V_d) + ln(N) + gamma`, the crate's default (asymptotic) constant.
 pub fn kl_constant_asymptotic(n_frames: usize, dimensions: usize) -> f64 {
     unit_ball_volume(dimensions).ln() + (n_frames as f64).ln() + EULER_MASCHERONI
 }

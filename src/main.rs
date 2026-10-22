@@ -223,7 +223,7 @@ fn main() {
     let constant = if exact_constant {
         FiniteSampleConstant::Exact
     } else {
-        FiniteSampleConstant::PythonCompatibleAsymptotic
+        FiniteSampleConstant::Asymptotic
     };
     let options = EntropyOptions {
         metrics: Some(&metrics),

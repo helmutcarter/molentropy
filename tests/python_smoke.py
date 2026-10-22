@@ -22,7 +22,7 @@ import numpy as np
 
 import nn_entropy
 
-EULER_MASCHERONI = 0.57721566490153
+EULER_MASCHERONI = float(np.euler_gamma)
 
 EXPECTED_EXPORTS = {
     "System",

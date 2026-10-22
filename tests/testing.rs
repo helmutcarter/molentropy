@@ -12,7 +12,7 @@ fn kl_constant(n_frames: usize, dimensions: usize) -> f64 {
         4 => std::f64::consts::PI.powi(2) / 2.0,
         _ => unreachable!(),
     };
-    (n_frames as f64).ln() + 0.57721566490153 + volume.ln()
+    (n_frames as f64).ln() + std::f64::consts::EULER_GAMMA + volume.ln()
 }
 
 #[test]
@@ -137,10 +137,10 @@ fn test_four_dimensional_mixed_metrics_match_brute_force() {
 }
 
 #[test]
-fn test_python_compatible_asymptotic_constant() {
+fn test_asymptotic_constant() {
     let data = vec![vec![0.0, 1.0]];
     let entropy = calculate_entropy(&data, 2, 1, &EntropyOptions::default()).unwrap();
-    let expected = (4.0_f64).ln() + 0.57721566490153;
+    let expected = (4.0_f64).ln() + std::f64::consts::EULER_GAMMA;
     assert_approx_eq!(entropy, expected, 1e-12);
 }
 
@@ -412,13 +412,11 @@ fn test_internal_coordinates() {
 }
 
 /// Sample term of the Kozachenko-Leonenko constant, written out independently of
-/// the implementation. `PythonCompatibleAsymptotic` is `ln(N) + gamma`; `Exact`
+/// the implementation. `Asymptotic` is `ln(N) + gamma`; `Exact`
 /// is the harmonic number `H_(N-1) = psi(N) - psi(1)`.
 fn sample_term(n_frames: usize, constant: FiniteSampleConstant) -> f64 {
     match constant {
-        FiniteSampleConstant::PythonCompatibleAsymptotic => {
-            (n_frames as f64).ln() + 0.57721566490153
-        }
+        FiniteSampleConstant::Asymptotic => (n_frames as f64).ln() + std::f64::consts::EULER_GAMMA,
         FiniteSampleConstant::Exact => (1..n_frames).map(|i| 1.0 / i as f64).sum(),
     }
 }
@@ -500,7 +498,7 @@ fn mutual_information_convention_shift_equals_sample_term_difference() {
         n_frames,
         &EntropyOptions {
             metrics: Some(&metrics),
-            constant: FiniteSampleConstant::PythonCompatibleAsymptotic,
+            constant: FiniteSampleConstant::Asymptotic,
             ..Default::default()
         },
     )
@@ -517,7 +515,7 @@ fn mutual_information_convention_shift_equals_sample_term_difference() {
     .expect("exact mutual information failed");
 
     let expected_shift = sample_term(n_frames, FiniteSampleConstant::Exact)
-        - sample_term(n_frames, FiniteSampleConstant::PythonCompatibleAsymptotic);
+        - sample_term(n_frames, FiniteSampleConstant::Asymptotic);
     assert!(
         expected_shift.abs() > 1e-3,
         "conventions must actually differ"
@@ -609,7 +607,7 @@ fn coordinate_estimators_compose_exact_constant_with_periodic_metrics() {
 }
 
 #[test]
-fn default_options_use_linear_metrics_and_the_python_compatible_constant() {
+fn default_options_use_linear_metrics_and_the_asymptotic_constant() {
     // Leaving the options at their defaults must keep the historical behavior.
     let data = three_coordinate_sample();
     let n_frames = data[0].len();
@@ -617,7 +615,7 @@ fn default_options_use_linear_metrics_and_the_python_compatible_constant() {
     let default = EntropyOptions::default();
     let explicit = EntropyOptions {
         metrics: Some(&metrics),
-        constant: FiniteSampleConstant::PythonCompatibleAsymptotic,
+        constant: FiniteSampleConstant::Asymptotic,
         ..Default::default()
     };
 

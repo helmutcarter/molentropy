@@ -20,7 +20,7 @@ fn entropy_options(
         constant: if exact_constant {
             FiniteSampleConstant::Exact
         } else {
-            FiniteSampleConstant::PythonCompatibleAsymptotic
+            FiniteSampleConstant::Asymptotic
         },
         theiler_window,
     }

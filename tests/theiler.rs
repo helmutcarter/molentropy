@@ -17,7 +17,7 @@ use nn_entropy::{
     estimate_coordinate_mutual_information,
 };
 
-const EULER_MASCHERONI: f64 = 0.57721566490153;
+const EULER_MASCHERONI: f64 = std::f64::consts::EULER_GAMMA;
 const TAU: f64 = std::f64::consts::TAU;
 
 fn windowed(theiler_window: usize, constant: FiniteSampleConstant) -> EntropyOptions<'static> {
@@ -87,7 +87,7 @@ fn explicit_zero_window_matches_default_options() {
     let mut rng = Rng::new(12);
     let data: Vec<Vec<f64>> = (0..5).map(|_| rng.normal_vec(400, 0.0, 1.0)).collect();
     for constant in [
-        FiniteSampleConstant::PythonCompatibleAsymptotic,
+        FiniteSampleConstant::Asymptotic,
         FiniteSampleConstant::Exact,
     ] {
         let default = EntropyOptions {
@@ -203,13 +203,8 @@ fn windowed_constant_matches_closed_form() {
     // Mean of H_(n_i - 1): (H_2 + H_1 + H_1 + H_2) / 4 = (1.5 + 1 + 1 + 1.5) / 4.
     assert_close("exact", exact, 2.0_f64.ln() + log_volume + 1.25);
 
-    let asymptotic = calculate_entropy(
-        &data,
-        4,
-        1,
-        &windowed(1, FiniteSampleConstant::PythonCompatibleAsymptotic),
-    )
-    .unwrap();
+    let asymptotic =
+        calculate_entropy(&data, 4, 1, &windowed(1, FiniteSampleConstant::Asymptotic)).unwrap();
     // Mean of ln(n_i) + gamma: (2 ln 3 + 2 ln 2) / 4 + gamma.
     assert_close(
         "asymptotic",

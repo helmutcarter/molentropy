@@ -16,9 +16,10 @@ pub enum CoordinateMetric {
 /// Sample-size term used in the Kozachenko-Leonenko entropy constant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FiniteSampleConstant {
-    /// Historical Python-compatible large-sample approximation: ln(N) + gamma.
+    /// Large-sample approximation ln(N) + gamma, the convention of the original
+    /// Python implementation.
     #[default]
-    PythonCompatibleAsymptotic,
+    Asymptotic,
     /// Exact k=1 finite-sample term: psi(N) - psi(1) = H_(N-1).
     Exact,
 }
@@ -104,12 +105,15 @@ fn entropy_constant_with_convention(
         }
     };
     validate_theiler_window(n_frames, theiler_window)?;
-    const EULER_MASCHERONI: f64 = 0.57721566490153;
+    // The reference Python implementation (NN_entropy_calc.py) hard-codes
+    // gamma as 0.57721566490153, truncated to 14 decimal places. Full double
+    // precision differs from it by about 6.6e-15, so the asymptotic constant,
+    // and every entropy computed with it, can differ from that implementation
+    // in the last few bits.
+    use std::f64::consts::EULER_GAMMA as EULER_MASCHERONI;
     if theiler_window == 0 {
         let sample_term = match convention {
-            FiniteSampleConstant::PythonCompatibleAsymptotic => {
-                (n_frames as f64).ln() + EULER_MASCHERONI
-            }
+            FiniteSampleConstant::Asymptotic => (n_frames as f64).ln() + EULER_MASCHERONI,
             FiniteSampleConstant::Exact => (1..n_frames).map(|i| 1.0 / i as f64).sum(),
         };
         return Ok(sample_term + log_unit_ball_volume);
@@ -129,9 +133,7 @@ fn entropy_constant_with_convention(
             let excluded = frame.min(theiler_window) + (n_frames - 1 - frame).min(theiler_window);
             let candidates = n_frames - excluded;
             match convention {
-                FiniteSampleConstant::PythonCompatibleAsymptotic => {
-                    (candidates as f64).ln() + EULER_MASCHERONI
-                }
+                FiniteSampleConstant::Asymptotic => (candidates as f64).ln() + EULER_MASCHERONI,
                 FiniteSampleConstant::Exact => harmonic[candidates - 1],
             }
         })
@@ -183,7 +185,7 @@ fn combination_from_rank<const K: usize>(mut rank: usize, n: usize) -> [usize; K
 /// Optional settings shared by every entropy estimator.
 ///
 /// `EntropyOptions::default()` treats every coordinate as linear, uses the
-/// historical Python-compatible finite-sample constant, and has no Theiler window.
+/// asymptotic finite-sample constant, and has no Theiler window.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EntropyOptions<'a> {
     /// Per-coordinate metrics; `None` treats every coordinate as linear.

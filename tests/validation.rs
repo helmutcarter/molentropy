@@ -292,7 +292,7 @@ fn both_finite_sample_conventions_are_accepted_everywhere() {
     let data = vec![vec![0.1, 0.4, 0.8, 1.1], vec![1.0, 1.3, 1.9, 2.2]];
     let metrics = linear(2);
     for constant in [
-        FiniteSampleConstant::PythonCompatibleAsymptotic,
+        FiniteSampleConstant::Asymptotic,
         FiniteSampleConstant::Exact,
     ] {
         for order in 1..=2 {
