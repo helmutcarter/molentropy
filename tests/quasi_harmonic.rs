@@ -719,9 +719,20 @@ fn too_few_frames_are_rejected() {
 
 #[test]
 fn a_linearly_dependent_coordinate_is_rejected() {
+    // Rounding leaves the zero eigenvalue of an exactly dependent set slightly
+    // positive or negative; either way it must count as singular.
     let mut rng = Rng::new(21);
     let x = rng.normal_vec(100, 0.0, 1.0);
+    let z = rng.normal_vec(100, 0.0, 1.0);
     let y: Vec<f64> = x.iter().map(|v| 2.0 * v + 1.0).collect();
+    let err = estimate_quasi_harmonic_entropy(
+        &[x.clone(), z, y.clone()],
+        100,
+        &QuasiHarmonicOptions::default(),
+        &EntropyOptions::default(),
+    )
+    .unwrap_err();
+    assert!(err.contains("singular"), "{err}");
     let err = estimate_quasi_harmonic_entropy(
         &[x, y],
         100,
@@ -729,6 +740,22 @@ fn a_linearly_dependent_coordinate_is_rejected() {
             marginals: MarginalEstimator::NearestNeighbor,
             ..Default::default()
         },
+        &EntropyOptions::default(),
+    )
+    .unwrap_err();
+    assert!(err.contains("singular"), "{err}");
+}
+
+#[test]
+fn a_linearly_dependent_coordinate_is_rejected_per_coordinate_too() {
+    let mut rng = Rng::new(21);
+    let x = rng.normal_vec(100, 0.0, 1.0);
+    let y: Vec<f64> = x.iter().map(|v| 2.0 * v + 1.0).collect();
+    let z = rng.normal_vec(100, 0.0, 1.0);
+    let err = estimate_coordinate_quasi_harmonic_entropy(
+        &[x, z, y],
+        100,
+        &QuasiHarmonicOptions::default(),
         &EntropyOptions::default(),
     )
     .unwrap_err();

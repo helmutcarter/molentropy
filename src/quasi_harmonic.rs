@@ -353,8 +353,17 @@ fn correlation_matrix(deviations: &[Deviations]) -> Vec<Vec<Complex>> {
 
 /// ln|A| of a Hermitian positive-definite matrix, from its Cholesky factor
 /// A = L L^H, whose diagonal is real and positive.
+/// Below this, a Cholesky pivot or an eigenvalue of an n x n correlation
+/// matrix cannot be told apart from zero. C has a unit diagonal, so both
+/// measure a coordinate's variance left unexplained, relative to 1, and the
+/// rounding error in C grows with n.
+fn singular_tolerance(n: usize) -> f64 {
+    64.0 * f64::EPSILON * n as f64
+}
+
 fn log_determinant(matrix: &[Vec<Complex>]) -> Result<f64, String> {
     let n = matrix.len();
+    let tolerance = singular_tolerance(n);
     let mut lower = vec![vec![(0.0, 0.0); n]; n];
     let mut log_det = 0.0;
     for j in 0..n {
@@ -363,8 +372,8 @@ fn log_determinant(matrix: &[Vec<Complex>]) -> Result<f64, String> {
                 .iter()
                 .map(|(re, im)| re * re + im * im)
                 .sum::<f64>();
-        // A NaN or non-positive pivot means C is not positive definite.
-        if !diagonal.is_finite() || diagonal <= 0.0 {
+        // A NaN or vanishing pivot means C is singular.
+        if !diagonal.is_finite() || diagonal <= tolerance {
             return Err(format!(
                 "the correlation matrix is singular: coordinate {j} is a linear combination of earlier coordinates"
             ));
@@ -390,6 +399,7 @@ fn log_determinant(matrix: &[Vec<Complex>]) -> Result<f64, String> {
 /// |V_ik|^2 ln lambda_k.
 fn log_diagonal(matrix: &[Vec<Complex>]) -> Result<Vec<f64>, String> {
     let n = matrix.len();
+    let tolerance = singular_tolerance(n);
     let singular = || {
         "the correlation matrix is singular: some coordinate is a linear combination of others"
             .to_string()
@@ -398,7 +408,7 @@ fn log_diagonal(matrix: &[Vec<Complex>]) -> Result<Vec<f64>, String> {
         eigenvalues
             .iter()
             .map(|&lambda| {
-                if lambda.is_finite() && lambda > 0.0 {
+                if lambda.is_finite() && lambda > tolerance {
                     Ok(lambda.ln())
                 } else {
                     Err(singular())
