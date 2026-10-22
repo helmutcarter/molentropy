@@ -4,13 +4,14 @@
 
 Estimate the configurational entropy of a molecular system, with a Rust library, CLI, and Python bindings.
 
-This crate provides non-parametric entropy estimation using the nearest-neighbor method with mutual information expansion on internal coordinates (bond lengths, bond angles, and torsion angles) with built-in conversion from MD trajectory files. File-based calculations use linear metrics for bonds and angles and a 2π-periodic metric for torsions.
+The crate converts Amber trajectories to internal coordinates (bond lengths, bond angles, and torsions) and estimates their entropy. File-based calculations use linear metrics for bonds and angles and a 2π-periodic metric for torsions.
 
 ## Features
-- Rust library API for MIE entropy up to fourth order, per-coordinate entropy, and mutual information estimates.
-- CLI that reads `.parm7` + `.nc` and converts to internal coordinates and prints total configurational entropy.
-- Python bindings via `pyo3` for in-memory arrays or direct file-based calculation.
-- Entropy calculations parallelized with `rayon`.
+- Estimators: the nearest-neighbor mutual information expansion (NN MIE) up to fourth order, with per-coordinate entropies and pairwise mutual information; quasi-harmonic (QH) and Boltzmann quasi-harmonic (BQH) entropy; and a legacy mode that reproduces the original Python implementation bit for bit.
+- Validated against thermodynamic reference entropies; see [Validation](#validation).
+- A CLI that reads `.parm7` + `.nc`, a Rust library, and Python bindings via `pyo3` for in-memory arrays or file-based calculation.
+- [API documentation](https://helmutcarter.github.io/nn-entropy/) published from the main branch.
+- Calculations parallelized with `rayon`.
 
 ## Requirements
 - Rust 1.94 or newer.
@@ -35,10 +36,12 @@ cargo run --release <path_to_parm7> <path_to_nc>
 ```
 
 Notes:
+- For most molecules `--estimator bqh` is the most accurate choice; see [Validation](#validation). The default estimator is the NN MIE.
+- `--torsions-only` drops the bonds and angles and estimates the entropy of the torsions alone.
 - `--stop` limits the number of frames read to N.
 - `--start` skips the first N frames.
 - `--stride` retains every Nth frame after `--start` (default: 1). Choose a stride based on a separate correlation-time analysis; the crate does not estimate an effective sample size automatically.
-- `--mie-order` selects the expansion order. The default is 2, and this should be good for most applications.
+- `--mie-order` selects the expansion order of the NN MIE. The default is 2.
 - `--no-periodic` forces every coordinate to use an ordinary linear metric. This produces a significant speedup, but the torsion entropy contribution loses some correctness.
 - `--theiler-window W` excludes temporally adjacent frames from the nearest-neighbor search: frame i's neighbor must satisfy |i - j| > W, counted in frames after `--start` and `--stride`. The default, 0, is the plain estimator. See [Correlated frames](#correlated-frames-and-the-theiler-window).
 - `--exact-constant` uses the exact finite-sample term `psi(N) - psi(1) = H_(N-1)`. The default is the common approximation `ln(N) + EulerGamma`.
@@ -96,6 +99,8 @@ Atom selection is this crate's, which handles layouts the script did not (see [I
 
 ## Rust library usage
 
+The [API documentation](https://helmutcarter.github.io/nn-entropy/) is the full reference; this section is a summary.
+
 ```rust
 use nn_entropy::{CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy};
 
@@ -116,11 +121,11 @@ let entropy = calculate_entropy(&one_d_data, frames_end, 2, &options)?;
 - `constant`: `FiniteSampleConstant::Asymptotic` (the default) or `FiniteSampleConstant::Exact`.
 - `theiler_window`: frames j with |i - j| <= `theiler_window` are never frame i's nearest neighbor. The default, 0, excludes only frame i itself.
 
-Every estimator takes the same options:
+The NN MIE functions take these options:
 - `calculate_entropy(data, frames_end, mie_order, &options)` returns the total entropy at MIE order 1, 2, 3 or 4.
 - `estimate_coordinate_entropy(data, frames_end, mie_order, &options)` returns each coordinate's share of the entropy at MIE order 1 or 2, so the values sum to `calculate_entropy` at the same order and with the same options. Order 1 gives the marginal entropies. Order 2 also splits each pairwise mutual information term evenly between its two coordinates. Orders 3 and 4 are rejected.
 - `estimate_coordinate_mutual_information(data, frames_end, &options)` returns the mutual information of each coordinate pair.
-- `calc_joint_nn([&x, &y, ...], metrics)` is the underlying nearest-neighbor sum, `sum over frames of ln(nearest-neighbor distance)`, in 1 to 4 dimensions. `calc_joint_nn_with_window(coordinates, metrics, w)` is the same sum with a Theiler window.
+- `calc_joint_nn([&x, &y, ...], metrics)` is the underlying nearest-neighbor sum, `sum over frames of ln(nearest-neighbor distance)`, in any number of dimensions; the MIE uses 1 to 4. `calc_joint_nn_with_window(coordinates, metrics, w)` is the same sum with a Theiler window.
 
 To build coordinates from files, use `bat_library::InternalCoordinates`:
 
@@ -138,7 +143,7 @@ let log_jacobian = internal.log_jacobian()?;   // per frame; tree bonds only
 
 `internal.int_coords` holds the values with shape `[n_frames][n_coords]`.
 
-The quasi-harmonic estimators take the same data and options:
+The quasi-harmonic estimators take the same data and options, plus their own settings:
 
 ```rust
 use nn_entropy::quasi_harmonic::{
@@ -174,7 +179,8 @@ Preferred usage:
 import nn_entropy
 
 system = nn_entropy.load_system("system.parm7", "trajectory.nc")
-entropy = nn_entropy.estimate_entropy(system, mie_order=2)
+bqh = system.estimate_quasi_harmonic_entropy()["boltzmann_quasi_harmonic"]
+entropy = nn_entropy.estimate_entropy(system, mie_order=2)  # NN MIE
 
 coordinate_entropy = system.estimate_coordinate_entropy()  # order 2, sums to `entropy`
 marginal_entropy = system.estimate_coordinate_entropy(mie_order=1)
@@ -208,11 +214,12 @@ The Kozachenko-Leonenko estimator assumes independent samples. When frames are s
 
 A Theiler window of `W` frames keeps every frame as a query point but takes its nearest neighbor only from frames more than `W` away in time. Each frame's finite-sample term uses the number of frames it can actually compete against, so the window does not bias the estimate for independent samples. Unlike `--stride`, it discards no data. Frames are counted after `--start` and `--stride`, and the series must have at least `2W + 2` frames.
 
-What the validation shows (`tests/theiler.rs`):
+What the tests show (`tests/theiler.rs`):
 - On an AR(1) series with lag-one correlation 0.99, the mutual information of two independent coordinates is +0.044 at `W = 0` and about 0 at `W = 5`.
 - On mildly correlated series (lag-one correlation 0.95), any `W` of a few frames or more removes the bias and leaves the estimate on a plateau. RMSE is lower than with any stride.
 - On strongly oversampled series the window over-corrects as `W` grows. The frames that remain eligible come in clusters, one per visit to a region, which lengthens nearest-neighbor distances. Mutual information then turns negative, about -0.04 at `W >= 50` in the example above. A window is not a substitute for adequate sampling.
-- On 100 ns production runs of small solvated ligands saved every 2 ps (50,000 frames), the order-2 total changes by at most about 0.4 k_B across `W = 0` to `250` (three ligands), while striding moves it by 10-20 k_B. At that spacing the frames are already effectively decorrelated, so the plain estimator is fine there.
+
+Outside the test suite, on 100 ns production runs of three small solvated ligands saved every 2 ps (50,000 frames), the order-2 total changes by at most about 0.4 k_B across `W = 0` to `250`, while striding moves it by 10-20 k_B. At that spacing the frames are already effectively decorrelated, so the plain estimator is fine there.
 
 Use a window when output is dense compared with the coordinates' correlation times. Choose `W` from a sweep: plot the entropy against `W` and take a value where the curve has stopped moving for the fast coordinates. Prefer a window to a stride when the goal is only to remove temporal neighbors.
 
@@ -248,9 +255,10 @@ The suite is split by concern:
 | `tests/testing.rs`, `tests/entropy.rs`, `tests/cli.rs` | Unit tests, fixture regressions, and CLI behavior. |
 
 Expected values in `analytic.rs`, `reference.rs`, `invariance.rs`, `geometry.rs`,
-`coordinates.rs` and `theiler.rs` are derived from theory or from an independent
-reference, never recorded from a previous run. The pinned totals in `entropy.rs`
-are regression values.
+`coordinates.rs`, `quasi_harmonic.rs` and `theiler.rs` are derived from theory or
+from an independent reference, never recorded from a previous run; those in
+`legacy.rs` were produced by the original Python script. The pinned totals in
+`entropy.rs` are regression values.
 
 The Rust suite does not link the Python extension, so the bindings have a
 separate smoke test that runs against a built wheel:
@@ -262,9 +270,11 @@ python tests/python_smoke.py
 ```
 
 CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`, `cargo clippy -D warnings`
-and `cargo test` on every push and pull request, plus the wheel build and smoke
-test on Python 3.10 and 3.12. A separate job checks that the crate still builds
-on the minimum supported Rust version, 1.94 (`rust-version` in `Cargo.toml`).
+and `cargo test` (doctests included) on every push to main and every pull request,
+plus the wheel build and smoke test on Python 3.10 and 3.12. Separate jobs build
+the documentation with warnings as errors and check that the crate still builds on
+the minimum supported Rust version, 1.94 (`rust-version` in `Cargo.toml`).
+`.github/workflows/pages.yml` publishes the documentation on every push to main.
 
 ## Project layout
 - `src/lib.rs`: the nearest-neighbor estimators, the MIE, and the nearest-neighbor search; also the crate documentation.
@@ -281,6 +291,9 @@ on the minimum supported Rust version, 1.94 (`rust-version` in `Cargo.toml`).
 - [Grid inhomogeneous solvation theory: Hydration structure and thermodynamics of the miniature receptor cucurbit[7]uril](https://pmc.ncbi.nlm.nih.gov/articles/PMC3416872/) - Uses nearest neighbor method to calculate first-order estimate of solvent entropy
 - [Extraction of configurational entropy from molecular simulations via an expansion approximation](https://pubmed.ncbi.nlm.nih.gov/17640119/) - Uses mutual information expansion to increase accuracy of entropy estimation of highly correlated systems like molecules
 - [Sample Estimate of the Entropy of a Random Vector](https://dmitripavlov.org/scans/kozachenko-leonenko.pdf) - First introduction of nearest neighbors entropy estimation
+- [Calculation of Configurational Entropy with a Boltzmann-Quasiharmonic Model: The Origin of High-Affinity Protein-Ligand Binding](https://doi.org/10.1021/jp111176x) - Harpole and Sharp's BQH method, including the `e^{iφ}` treatment of torsion correlations
+- [Developing end-point methods for absolute binding free energy calculation using the Boltzmann-quasiharmonic model](https://pmc.ncbi.nlm.nih.gov/articles/PMC9044818/) - BQH and QH compared for host-guest binding
+- [Method for estimating the configurational entropy of macromolecules](https://doi.org/10.1021/ma50003a019) - Karplus and Kushick's quasi-harmonic approximation
 
 
 ## License
