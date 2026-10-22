@@ -39,6 +39,17 @@ pub fn bond_angle(a1: [f64; 3], a2: [f64; 3], a3: [f64; 3]) -> f64 {
 /// Torsion a1-a2-a3-a4 in radians, in (-pi, pi]. The sign is the negative of
 /// the IUPAC dihedral convention.
 pub fn torsion_angle(a1: [f64; 3], a2: [f64; 3], a3: [f64; 3], a4: [f64; 3]) -> f64 {
+    torsion_angle_with(a1, a2, a3, a4, f64::sqrt)
+}
+
+/// [`torsion_angle`] with `root` taking the square root of |b2|^2.
+fn torsion_angle_with(
+    a1: [f64; 3],
+    a2: [f64; 3],
+    a3: [f64; 3],
+    a4: [f64; 3],
+    root: fn(f64) -> f64,
+) -> f64 {
     let b1 = [a1[0] - a2[0], a1[1] - a2[1], a1[2] - a2[2]];
     let b2 = [a2[0] - a3[0], a2[1] - a3[1], a2[2] - a3[2]];
     let b3 = [a3[0] - a4[0], a3[1] - a4[1], a3[2] - a4[2]];
@@ -55,7 +66,7 @@ pub fn torsion_angle(a1: [f64; 3], a2: [f64; 3], a3: [f64; 3], a4: [f64; 3]) -> 
     ];
 
     let p1 = (b1[0] * c1[0] + b1[1] * c1[1] + b1[2] * c1[2])
-        * (b2[0] * b2[0] + b2[1] * b2[1] + b2[2] * b2[2]).sqrt();
+        * root(b2[0] * b2[0] + b2[1] * b2[1] + b2[2] * b2[2]);
     let p2 = c1[0] * c2[0] + c1[1] * c2[1] + c1[2] * c2[2];
 
     p1.atan2(p2)
@@ -74,6 +85,16 @@ fn bond_angle_f32(a1: [f32; 3], a2: [f32; 3], a3: [f32; 3]) -> f64 {
 }
 
 fn torsion_angle_f32(a1: [f32; 3], a2: [f32; 3], a3: [f32; 3], a4: [f32; 3]) -> f64 {
+    torsion_angle_f32_with(a1, a2, a3, a4, f64::sqrt)
+}
+
+fn torsion_angle_f32_with(
+    a1: [f32; 3],
+    a2: [f32; 3],
+    a3: [f32; 3],
+    a4: [f32; 3],
+    root: fn(f64) -> f64,
+) -> f64 {
     let b1 = [a1[0] - a2[0], a1[1] - a2[1], a1[2] - a2[2]];
     let b2 = [a2[0] - a3[0], a2[1] - a3[1], a2[2] - a3[2]];
     let b3 = [a3[0] - a4[0], a3[1] - a4[1], a3[2] - a4[2]];
@@ -91,10 +112,59 @@ fn torsion_angle_f32(a1: [f32; 3], a2: [f32; 3], a3: [f32; 3], a4: [f32; 3]) -> 
 
     let p1_f32 = b1[0] * c1[0] + b1[1] * c1[1] + b1[2] * c1[2];
     let b2_sum = b2[0] * b2[0] + b2[1] * b2[1] + b2[2] * b2[2];
-    let p1 = (p1_f32 as f64) * (b2_sum as f64).sqrt();
+    let p1 = (p1_f32 as f64) * root(b2_sum as f64);
     let p2_f32 = c1[0] * c2[0] + c1[1] * c2[1] + c1[2] * c2[2];
 
     p1.atan2(p2_f32 as f64)
+}
+
+/// Angle a1-a2-a3 by the acos formula of the original Python implementation,
+/// acos(v1 . v2 / (|v1| |v2|)). Returns NaN when rounding pushes the ratio
+/// outside [-1, 1], which can happen for a straight angle; see [`bond_angle`].
+pub fn legacy_bond_angle(a1: [f64; 3], a2: [f64; 3], a3: [f64; 3]) -> f64 {
+    let v1 = [a1[0] - a2[0], a1[1] - a2[1], a1[2] - a2[2]];
+    let v2 = [a3[0] - a2[0], a3[1] - a2[1], a3[2] - a2[2]];
+    let v1_mag = (v1[0] * v1[0] + v1[1] * v1[1] + v1[2] * v1[2]).sqrt();
+    let v2_mag = (v2[0] * v2[0] + v2[1] * v2[1] + v2[2] * v2[2]).sqrt();
+    let dot = v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
+    (dot / (v1_mag * v2_mag)).acos()
+}
+
+/// [`legacy_bond_angle`] on f32 positions, with the Python implementation's
+/// mix of f32 and f64 steps: differences and the dot product in f32,
+/// magnitudes in f64.
+pub(super) fn legacy_bond_angle_f32(a1: [f32; 3], a2: [f32; 3], a3: [f32; 3]) -> f64 {
+    let v1 = [a1[0] - a2[0], a1[1] - a2[1], a1[2] - a2[2]];
+    let v2 = [a3[0] - a2[0], a3[1] - a2[1], a3[2] - a2[2]];
+    let squared = |v: [f32; 3]| v.iter().map(|&c| c as f64 * c as f64).sum::<f64>();
+    let v1_mag = squared(v1).sqrt();
+    let v2_mag = squared(v2).sqrt();
+    let dot = v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
+    (dot as f64 / (v1_mag * v2_mag)).acos()
+}
+
+/// NumPy evaluates the Python implementation's `x ** 0.5` as libm's
+/// `pow(x, 0.5)`, which is not always correctly rounded: it differs from
+/// `sqrt(x)` by one ulp for roughly 1 in 1000 inputs.
+fn legacy_root(x: f64) -> f64 {
+    // black_box keeps the exponent opaque, so the compiler cannot rewrite the
+    // call as sqrt.
+    x.powf(std::hint::black_box(0.5))
+}
+
+/// Torsion a1-a2-a3-a4 as the original Python implementation computed it:
+/// [`torsion_angle`] with |b2| taken as `pow(|b2|^2, 0.5)`.
+pub fn legacy_torsion_angle(a1: [f64; 3], a2: [f64; 3], a3: [f64; 3], a4: [f64; 3]) -> f64 {
+    torsion_angle_with(a1, a2, a3, a4, legacy_root)
+}
+
+pub(super) fn legacy_torsion_angle_f32(
+    a1: [f32; 3],
+    a2: [f32; 3],
+    a3: [f32; 3],
+    a4: [f32; 3],
+) -> f64 {
+    torsion_angle_f32_with(a1, a2, a3, a4, legacy_root)
 }
 
 /// Evaluates every BAT entry on every frame: a two-atom entry is a bond length,

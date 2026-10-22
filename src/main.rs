@@ -1,14 +1,15 @@
 use std::env;
 use std::path::Path;
 
-use nn_entropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
+use nn_entropy::bat_library::{BondSet, CoordinateOptions, Geometry, InternalCoordinates};
+use nn_entropy::legacy::legacy_entropy;
 use nn_entropy::{CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--phase-angles] [--jacobian]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--phase-angles] [--jacobian] [--legacy]",
             args[0]
         );
         std::process::exit(1);
@@ -24,7 +25,7 @@ fn main() {
     let mut exact_constant = false;
     let mut start: Option<usize> = None;
     let mut stop: Option<usize> = None;
-    let mut use_python = false;
+    let mut legacy = false;
     let mut mie_order = 2;
     let mut stride = 1usize;
     let mut theiler_window = 0usize;
@@ -101,8 +102,8 @@ fn main() {
                     .expect("invalid --theiler-window value");
                 i += 2;
             }
-            "--python" => {
-                use_python = true;
+            "--legacy" => {
+                legacy = true;
                 i += 1;
             }
             other => {
@@ -124,48 +125,23 @@ fn main() {
         std::process::exit(1);
     }
 
-    if use_python {
-        if !cfg!(debug_assertions) {
-            eprintln!("--python is only available in debug builds.");
-            std::process::exit(1);
+    if legacy {
+        // The original Python estimator had none of these; each would make the
+        // result differ from it.
+        let conflicts = [
+            (exact_constant, "--exact-constant"),
+            (theiler_window != 0, "--theiler-window"),
+            (mie_order != 2, "--mie-order other than 2"),
+            (tree_bonds, "--tree-bonds"),
+            (phase_angles, "--phase-angles"),
+            (jacobian, "--jacobian"),
+        ];
+        for (given, flag) in conflicts {
+            if given {
+                eprintln!("{flag} cannot be combined with --legacy");
+                std::process::exit(1);
+            }
         }
-        if stride != 1 {
-            eprintln!("--stride is not supported by the legacy --python comparison mode.");
-            std::process::exit(1);
-        }
-        if exact_constant {
-            eprintln!("--exact-constant is not supported by the legacy --python mode.");
-            std::process::exit(1);
-        }
-        if theiler_window != 0 {
-            eprintln!("--theiler-window is not supported by the legacy --python mode.");
-            std::process::exit(1);
-        }
-        let script = "/gibbs/helmut/code/python_scripts/NN_entropy_calc_rusty.py";
-        let frame_arg = stop
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "-1".to_string());
-        let output = std::process::Command::new("python")
-            .arg(script)
-            .arg(top_path)
-            .arg(frame_arg)
-            .arg(traj_path)
-            .output()
-            .expect("failed to run python entropy script");
-        if !output.status.success() {
-            eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-            std::process::exit(1);
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let entropy = stdout
-            .trim()
-            .split(',')
-            .next_back()
-            .and_then(|s| s.split_whitespace().next())
-            .and_then(|s| s.parse::<f64>().ok())
-            .expect("failed to parse python entropy output");
-        println!("Total entropy = {}", entropy);
-        return;
     }
 
     let coordinate_options = CoordinateOptions {
@@ -175,6 +151,11 @@ fn main() {
             BondSet::HeavyAtom
         },
         phase_angles,
+        geometry: if legacy {
+            Geometry::Legacy
+        } else {
+            Geometry::Standard
+        },
     };
     let mut internal = InternalCoordinates::with_options(top_path, coordinate_options)
         .expect("failed to build BAT list from topology");
@@ -230,7 +211,12 @@ fn main() {
         constant,
         theiler_window,
     };
-    let entropy = match calculate_entropy(&one_d_data, used_frames, mie_order, &options) {
+    let result = if legacy {
+        legacy_entropy(&one_d_data, used_frames)
+    } else {
+        calculate_entropy(&one_d_data, used_frames, mie_order, &options)
+    };
+    let entropy = match result {
         Ok(value) => value,
         Err(err) => {
             eprintln!("Entropy calculation failed: {err}");
