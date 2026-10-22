@@ -35,7 +35,10 @@ pub enum MarginalEstimator {
     /// Sharp's eq 9. Linear coordinates are binned over their observed range,
     /// periodic ones over a full period. Some later BQH work reports the
     /// discrete entropy -sum p_k ln p_k, which is this value minus ln(width).
-    Histogram { bins: usize },
+    Histogram {
+        /// Number of equal-width bins per coordinate.
+        bins: usize,
+    },
 }
 
 /// How periodic coordinates enter the correlation matrix.
@@ -57,7 +60,9 @@ pub enum PeriodicCorrelation {
 /// Settings specific to the quasi-harmonic estimators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct QuasiHarmonicOptions {
+    /// How BQH estimates each coordinate's first-order entropy.
     pub marginals: MarginalEstimator,
+    /// How periodic coordinates enter the correlation matrix.
     pub periodic: PeriodicCorrelation,
 }
 

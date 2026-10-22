@@ -1,3 +1,9 @@
+//! The `nn_entropy` Python extension module, built with maturin.
+//!
+//! Its functions are called from Python, not from Rust; the README documents
+//! the Python API. Every function wraps an estimator of this crate and releases
+//! the GIL while it runs.
+
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
 use crate::quasi_harmonic::{MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions};
