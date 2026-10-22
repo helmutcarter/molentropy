@@ -68,6 +68,7 @@ let entropy = calculate_entropy(&one_d_data, frames_end, 2, &EntropyOptions::def
 let options = EntropyOptions {
     metrics: Some(&metrics), // one CoordinateMetric per coordinate
     constant: FiniteSampleConstant::Exact,
+    ..Default::default()
 };
 let entropy = calculate_entropy(&one_d_data, frames_end, 2, &options)?;
 ```
@@ -103,13 +104,13 @@ let log_jacobian = internal.log_jacobian()?;   // per frame; tree bonds only
 
 The crate exposes a `nn_entropy` Python module (built from `src/pyo3_api.rs`) with:
 - `load_system(top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None, tree_bonds=False, phase_angles=False)`. See [Coordinate sets](#coordinate-sets).
-- `estimate_entropy(data_or_system, mie_order=None, periods=None, exact_constant=False)`. `mie_order` defaults to 2; `mie_order=1` gives the sum of the marginal entropies.
-- `estimate_coordinate_entropy(data_or_system, mie_order=None, periods=None, exact_constant=False)`. Returns each coordinate's share of the entropy; `mie_order` defaults to 2 and must be 1 or 2. The values sum to `estimate_entropy` at the same order.
-- `estimate_coordinate_mutual_information(data_or_system, periods=None, exact_constant=False)`
-- `System` has the same three estimators as methods, each taking `exact_constant` (and `mie_order` for the two entropy estimators). Its `mean_log_jacobian` property is the mean log BAT Jacobian over the selected frames. It raises `ValueError` unless the system was loaded with `tree_bonds=True` and without `torsions_only`.
+- `estimate_entropy(data_or_system, mie_order=None, periods=None, exact_constant=False, theiler_window=0)`. `mie_order` defaults to 2; `mie_order=1` gives the sum of the marginal entropies.
+- `estimate_coordinate_entropy(data_or_system, mie_order=None, periods=None, exact_constant=False, theiler_window=0)`. Returns each coordinate's share of the entropy; `mie_order` defaults to 2 and must be 1 or 2. The values sum to `estimate_entropy` at the same order.
+- `estimate_coordinate_mutual_information(data_or_system, periods=None, exact_constant=False, theiler_window=0)`. Returns the mutual information of each coordinate pair.
+- `System` has the same three estimators as methods, each taking `exact_constant` and `theiler_window` (and `mie_order` for the two entropy estimators). Its `mean_log_jacobian` property is the mean log BAT Jacobian over the selected frames. It raises `ValueError` unless the system was loaded with `tree_bonds=True` and without `torsions_only`.
 - To start from an Amber topology and trajectory, call `load_system(...)` once and use the `System` methods or pass the `System` to any estimator. The coordinate metrics come from the generated BAT coordinates automatically, and the trajectory is only read once no matter how many quantities you compute.
 
-`exact_constant=True` uses the exact finite-sample term, like the CLI's `--exact-constant`. Every estimator, as a module function or a `System` method, also takes `theiler_window=0`, like the CLI's `--theiler-window`.
+`exact_constant=True` uses the exact finite-sample term, like the CLI's `--exact-constant`, and `theiler_window` matches the CLI's `--theiler-window`.
 
 For a raw array, `periods` is a sequence with one entry per coordinate. Use `None` for a linear dimension and a positive period for a periodic dimension. Omitting `periods` preserves the linear behavior of the original raw-array API.
 
@@ -137,15 +138,15 @@ Threading note:
 
 ## Interpretation and limitations
 
-- File-based calculations select the solute automatically. Water is excluded when its atom type is an Amber water type (`OW`, `HW`, `EP`, `EPW`) or its residue is a water name (`WAT`, `HOH`, `SOL`, `TIP3`, `SPCE`, `OPC`, and similar), so four-point models and non-Amber water types are handled. Massless virtual sites are excluded because they carry no degrees of freedom. Monatomic species such as counter-ions contribute nothing, since they have no internal coordinates, and a heavy-atom diatomic contributes only its bond length. Solute atoms may appear anywhere in the topology.
+- File-based calculations select the solute automatically. Water is excluded when its atom type is an Amber water type (`OW`, `HW`, `EP`, `EPW`) or its residue is a water name (`WAT`, `HOH`, `SOL`, `TIP3`, `SPCE`, `OPC`, and similar), so four-point models and non-Amber water types are handled. Massless virtual sites are excluded because they carry no degrees of freedom. Monatomic species such as counter-ions contribute nothing, since they have no internal coordinates, and a diatomic contributes only its bond length (with the default bond set, only when both atoms are heavy). Solute atoms may appear anywhere in the topology.
 - The trajectory must have exactly as many atoms as the topology. A stripped topology paired with a solvated trajectory is rejected rather than read on the assumption that atoms line up.
 - Results are differential internal-coordinate entropies in natural-log units (equivalently, units of `k_B`), not kcal mol⁻¹ K⁻¹.
-- To remain numerically compatible with the historical Python implementation, the nearest-neighbor constant uses the large-sample approximation `ln(N) + EulerGamma` in place of the exact finite-sample term `psi(N) - psi(1) = H_(N-1)`. Their per-entropy difference is approximately `1/(2N)` and is negligible for the intended 50,000-frame calculations, but it can accumulate across MIE terms or become important for very small samples. The convention is a property of the estimator, not of the total alone: pairwise mutual information shifts by exactly `H_(N-1) - (ln(N) + EulerGamma)` per pair when it changes, so per-coordinate results must be computed under the same convention as the total they are compared against. The Python implementation truncated EulerGamma to `0.57721566490153`; this crate uses the full double-precision value, so results can differ from it by roughly 1e-14.
+- Following the historical Python implementation, the default nearest-neighbor constant uses the large-sample approximation `ln(N) + EulerGamma` in place of the exact finite-sample term `psi(N) - psi(1) = H_(N-1)`. Their per-entropy difference is approximately `1/(2N)` and is negligible for the intended 50,000-frame calculations, but it can accumulate across MIE terms or become important for very small samples. The convention is a property of the estimator, not of the total alone: pairwise mutual information shifts by exactly `H_(N-1) - (ln(N) + EulerGamma)` per pair when it changes, so per-coordinate results must be computed under the same convention as the total they are compared against. The Python implementation truncated EulerGamma to `0.57721566490153`; this crate uses the full double-precision value, so results can differ from it by roughly 1e-14.
 - The default second-order mutual-information expansion is a truncation and can omit higher-order correlations.
 - The reported value does not include a BAT-to-Cartesian Jacobian correction, momentum entropy, or a standard-state term, and must not be described as an absolute thermodynamic entropy. `--jacobian` reports the Jacobian term separately, for the tree bond set, but does not add it to the total.
 - Exact duplicate samples use the nearest distinct coordinate point. Many ties usually indicate inadequate coordinate precision or sampling and should be investigated.
 - MD frames are generally correlated. See below.
-- Corrected file-based results differ from historical versions because torsions are now periodic; the historical asymptotic finite-sample constant is retained for Python compatibility.
+- File-based results differ from the historical Python implementation because torsions are now periodic. Its asymptotic finite-sample convention is kept as the default.
 
 ## Correlated frames and the Theiler window
 
@@ -171,19 +172,21 @@ The suite is split by concern:
 
 | File | Covers |
 |---|---|
-| `tests/common/mod.rs` | Shared helpers: a self-contained RNG, closed-form entropies, an O(N^2) nearest-neighbor reference. Calls none of the code it checks. |
+| `tests/common/` | Shared helpers: a self-contained RNG, closed-form entropies, an O(N^2) nearest-neighbor reference, and writers for Amber topologies and NetCDF trajectories (`amber.rs`). Calls none of the code it checks. |
 | `tests/analytic.rs` | Closed-form ground truth: uniform, normal, exponential, circular uniform, bivariate-normal joint entropy and mutual information, plus a convergence check. |
 | `tests/reference.rs` | Brute-force cross-checks of the kd-tree search for 1-4 dimensions and every metric combination, and of the MIE expansion against an independent inclusion-exclusion evaluation. |
 | `tests/invariance.rs` | Translation, reflection, relabeling, frame reordering, scaling equivariance, periodic rotation, and floating-point behavior. |
 | `tests/geometry.rs` | Bonds, angles and torsions from constructed configurations; the torsion sign convention; the end-to-end BAT path on the fixture. |
+| `tests/topology.rs` | Atom selection and file reading across layouts the fixture does not cover: solvent before or between solute molecules, counter-ions, four-point and non-Amber water, and NetCDF corner cases. |
 | `tests/validation.rs` | The input-validation contract: which inputs are refused and what each error says. |
 | `tests/coordinates.rs` | Coordinate sets: 3N - 6 tree bonds forming a spanning tree, phase angles as wrapped torsion offsets that are stiff for a rigid rotor, and the BAT Jacobian against the constructed geometry. |
 | `tests/theiler.rs` | Theiler window: bitwise equality with the plain estimator at `W = 0`, brute-force agreement for every window and dimension, the closed-form constant, validation, and AR(1) bias behavior. |
 | `tests/testing.rs`, `tests/entropy.rs`, `tests/cli.rs` | Unit tests, fixture regressions, and CLI behavior. |
 
-Expected values in `analytic.rs`, `reference.rs`, `invariance.rs` and `geometry.rs`
-are derived from theory or from an independent reference, never recorded from a
-previous run, per the requirements in `REVIEW.md`.
+Expected values in `analytic.rs`, `reference.rs`, `invariance.rs`, `geometry.rs`,
+`coordinates.rs` and `theiler.rs` are derived from theory or from an independent
+reference, never recorded from a previous run. The pinned totals in `entropy.rs`
+are regression values.
 
 The Rust suite does not link the Python extension, so the bindings have a
 separate smoke test that runs against a built wheel:
@@ -199,11 +202,11 @@ and `cargo test` on every push and pull request, plus the wheel build and smoke
 test on Python 3.10 and 3.12.
 
 ## Project layout
-- `src/lib.rs`: core entropy estimation and internal coordinate utilities.
-- `src/bat_library/`: NetCDF reader for `.parm7` + `.nc`, and internal coordinate (BAT) conversion.
+- `src/lib.rs`: entropy estimators, the MIE, and the nearest-neighbor search.
+- `src/bat_library/`: `.parm7` parser, NetCDF trajectory reader, solute selection, and BAT coordinate construction (`geometry.rs` holds the bond, angle and torsion functions).
 - `src/main.rs`: CLI entry point.
 - `src/pyo3_api.rs`: Python bindings.
-- `tests/`: unit and regression tests.
+- `tests/`: the test suite (see [Tests](#tests)).
 
 ## Further Reading
 - [Grid inhomogeneous solvation theory: Hydration structure and thermodynamics of the miniature receptor cucurbit[7]uril](https://pmc.ncbi.nlm.nih.gov/articles/PMC3416872/) - Uses nearest neighbor method to calculate first-order estimate of solvent entropy
