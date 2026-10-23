@@ -882,10 +882,10 @@ pub struct InternalCoordinates {
     /// torsions.
     torsions_only: bool,
     /// Solute bonds that lie on a ring, as sorted pairs of local indices.
-    ring_bonds: HashSet<(usize, usize)>,
+    ring_bonds: Bonds,
     /// Non-ring bonds one end of which carries only two or more terminal atoms
     /// of one element (CH3, NH3+, CF3, ...), as sorted pairs of local indices.
-    symmetric_rotor_bonds: HashSet<(usize, usize)>,
+    symmetric_rotor_bonds: Bonds,
     /// Number of coordinates.
     pub dim: usize,
     /// Coordinate values, `int_coords[frame][coordinate]`, filled by
@@ -1027,7 +1027,7 @@ impl InternalCoordinates {
 
         let (ring_bonds, symmetric_rotor_bonds) =
             bond_topology(&prmtop, &adjacency, &molecule_mask);
-        let to_local = |bonds: HashSet<(usize, usize)>| -> HashSet<(usize, usize)> {
+        let to_local = |bonds: Bonds| -> Bonds {
             bonds
                 .into_iter()
                 .map(|(a, b)| (local[a].min(local[b]), local[a].max(local[b])))
@@ -1317,6 +1317,9 @@ impl InternalCoordinates {
     }
 }
 
+/// A set of bonds, each a sorted pair of atom indices.
+type Bonds = HashSet<(usize, usize)>;
+
 /// The central bond of a torsion entry, as a sorted pair.
 fn central_bond(entry: &[usize]) -> (usize, usize) {
     (entry[1].min(entry[2]), entry[1].max(entry[2]))
@@ -1325,11 +1328,7 @@ fn central_bond(entry: &[usize]) -> (usize, usize) {
 /// Ring bonds and symmetric rotor bonds of the solute, as sorted pairs of
 /// topology indices. A bond lies on a ring exactly when it is not a bridge of
 /// the bond graph.
-fn bond_topology(
-    prmtop: &Prmtop,
-    adjacency: &[Vec<usize>],
-    include: &[bool],
-) -> (HashSet<(usize, usize)>, HashSet<(usize, usize)>) {
+fn bond_topology(prmtop: &Prmtop, adjacency: &[Vec<usize>], include: &[bool]) -> (Bonds, Bonds) {
     let n = adjacency.len();
     let neighbors = |a: usize| adjacency[a].iter().copied().filter(move |&b| include[b]);
 

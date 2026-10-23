@@ -179,7 +179,7 @@ fn validate(values: &[f64], period: f64, options: &BasinOptions) -> Result<(), S
     if options.bins < 3 {
         return Err("basin detection needs at least 3 bins".to_string());
     }
-    if !(options.smoothing >= 0.0) {
+    if options.smoothing.is_nan() || options.smoothing < 0.0 {
         return Err("smoothing must be at least 0".to_string());
     }
     if !(options.saddle_fraction > 0.0 && options.saddle_fraction <= 1.0) {

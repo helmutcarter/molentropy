@@ -108,6 +108,7 @@ pub mod bat_library;
 pub mod legacy;
 pub mod pyo3_api;
 pub mod quasi_harmonic;
+pub mod split;
 
 /// Metric used for one internal-coordinate dimension.
 #[derive(Debug, Clone, Copy, PartialEq)]
