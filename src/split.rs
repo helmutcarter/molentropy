@@ -27,8 +27,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::basins::{BasinOptions, Basins, detect_basins};
 use crate::quasi_harmonic::{
-    MarginalEstimator, QuasiHarmonicOptions, Representation, correlation_log_det,
-    quasi_harmonic_terms,
+    MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions, Representation,
+    correlation_log_det, quasi_harmonic_terms,
 };
 use crate::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_joint_entropy, resolve_input,
@@ -170,15 +170,22 @@ pub struct SplitOptions<'a> {
 
 impl<'a> SplitOptions<'a> {
     /// The default settings for the soft set `soft`: NN MIE-2 for the soft
-    /// coordinates, QH for the hard ones, and per-state coupling over the
-    /// detected states.
+    /// coordinates; QH for the hard ones, with hard periodic coordinates
+    /// centered on their circular mean; and Gaussian coupling with soft
+    /// torsions as e^(i phi). These scored best against the butane TI/MBAR
+    /// references; see the validation page of the user guide.
     pub fn new(soft: SoftSelection<'a>) -> Self {
         Self {
             soft,
             soft_estimator: SoftEstimator::default(),
             hard_estimator: HardEstimator::default(),
-            hard: QuasiHarmonicOptions::default(),
-            coupling: Coupling::PerState(StateOptions::default()),
+            hard: QuasiHarmonicOptions {
+                periodic: PeriodicCorrelation::Centered,
+                ..Default::default()
+            },
+            coupling: Coupling::Gaussian {
+                features: SoftFeatures::Complex,
+            },
             basins: BasinOptions::default(),
         }
     }

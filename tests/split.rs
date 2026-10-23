@@ -10,7 +10,9 @@ mod common;
 use std::f64::consts::{E, PI, TAU};
 
 use common::Rng;
-use nn_entropy::quasi_harmonic::{QuasiHarmonicOptions, estimate_quasi_harmonic_entropy};
+use nn_entropy::quasi_harmonic::{
+    PeriodicCorrelation, QuasiHarmonicOptions, estimate_quasi_harmonic_entropy,
+};
 use nn_entropy::split::{
     Coupling, HardEstimator, SoftEstimator, SoftFeatures, SoftSelection, SplitOptions,
     StateDefinition, StateOptions, estimate_split_entropy,
@@ -91,13 +93,12 @@ fn without_soft_coordinates_it_is_the_quasi_harmonic_entropy() {
     let mut rng = Rng::new(71);
     let (data, _) = well_system(&mut rng, 3_000);
     let metrics = [TORSION, LINEAR, TORSION];
-    let qh = estimate_quasi_harmonic_entropy(
-        &data,
-        3_000,
-        &QuasiHarmonicOptions::default(),
-        &options(&metrics),
-    )
-    .unwrap();
+    // The split estimator's default centers hard periodic coordinates.
+    let centered = QuasiHarmonicOptions {
+        periodic: PeriodicCorrelation::Centered,
+        ..Default::default()
+    };
+    let qh = estimate_quasi_harmonic_entropy(&data, 3_000, &centered, &options(&metrics)).unwrap();
     for (hard_estimator, expected) in [
         (HardEstimator::QuasiHarmonic, qh.quasi_harmonic),
         (
@@ -246,11 +247,9 @@ fn per_state_coupling_recovers_a_well_dependent_spread() {
     let metrics = [TORSION, LINEAR];
     let truth = well_system_entropy();
 
-    let per_state = split(
-        &data,
-        &metrics,
-        &SplitOptions::new(SoftSelection::Indices(&[0])),
-    );
+    let mut settings = SplitOptions::new(SoftSelection::Indices(&[0]));
+    settings.coupling = Coupling::PerState(StateOptions::default());
+    let per_state = split(&data, &metrics, &settings);
     assert!(
         (per_state.total - truth).abs() < 0.03,
         "{} vs {truth}",
@@ -389,6 +388,7 @@ fn invalid_settings_are_refused() {
 
     let mut windowed = SplitOptions::new(SoftSelection::Indices(&[0]));
     windowed.hard_estimator = HardEstimator::BoltzmannQuasiHarmonic;
+    windowed.coupling = Coupling::PerState(StateOptions::default());
     assert!(error(&windowed, 1).contains("Theiler window"));
 
     let mut too_many = SplitOptions::new(SoftSelection::Indices(&[0]));
