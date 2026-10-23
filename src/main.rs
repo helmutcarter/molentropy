@@ -9,7 +9,7 @@ use nn_entropy::quasi_harmonic::{
 };
 use nn_entropy::{
     CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy,
-    estimate_coordinate_entropy,
+    estimate_coordinate_entropy, estimate_coordinate_mutual_information,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -23,6 +23,11 @@ enum Estimator {
 fn fail(message: impl std::fmt::Display) -> ! {
     eprintln!("{message}");
     std::process::exit(1);
+}
+
+/// The value of `result`, or `context` and the error, then exit with status 1.
+fn or_fail<T>(result: Result<T, String>, context: &str) -> T {
+    result.unwrap_or_else(|err| fail(format!("{context}: {err}")))
 }
 
 /// The value after the flag `args[i]`, parsed as `T`.
@@ -39,7 +44,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         fail(format!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information]",
             args[0]
         ));
     }
@@ -59,6 +64,7 @@ fn main() {
     let mut estimator = Estimator::NearestNeighbor;
     let mut histogram_bins: Option<usize> = None;
     let mut per_coordinate = false;
+    let mut mutual_information = false;
     let mut periodic_correlation: Option<PeriodicCorrelation> = None;
     let mut mie_order = 2;
     let mut stride = 1usize;
@@ -132,6 +138,10 @@ fn main() {
                 };
                 i += 2;
             }
+            "--mutual-information" => {
+                mutual_information = true;
+                i += 1;
+            }
             "--per-coordinate" => {
                 per_coordinate = true;
                 i += 1;
@@ -182,6 +192,9 @@ fn main() {
     if per_coordinate && estimator == Estimator::NearestNeighbor && mie_order > 2 {
         fail("--per-coordinate supports --mie-order 1 or 2");
     }
+    if mutual_information && estimator != Estimator::NearestNeighbor {
+        fail("--mutual-information applies only to --estimator nn");
+    }
     if histogram_bins == Some(0) {
         fail("--histogram-bins must be at least 1");
     }
@@ -200,6 +213,7 @@ fn main() {
             (phase_angles == Some(true), "--phase-angles"),
             (jacobian, "--jacobian"),
             (per_coordinate, "--per-coordinate"),
+            (mutual_information, "--mutual-information"),
         ];
         for (given, flag) in conflicts {
             if given {
@@ -238,48 +252,26 @@ fn main() {
             ))
         });
 
-    let frames = internal.int_coords.len();
-    if frames == 0 {
-        fail("No frames read from trajectory.");
-    }
     let start = start.unwrap_or(0);
-    if start >= frames {
-        fail("--start is beyond available frames.");
-    }
-    let dim = internal
-        .int_coords
-        .first()
-        .map(|row| row.len())
-        .unwrap_or(0);
-    if dim == 0 {
-        fail("No internal coordinates were generated.");
-    }
-
+    let one_d_data = internal
+        .columns(start, stride)
+        .unwrap_or_else(|err| fail(format!("Cannot select frames: {err}")));
+    // Look these up once: the tables below describe every coordinate.
+    let kinds = internal.coordinate_kinds();
+    let atoms = internal.coordinate_atoms();
     let metrics = if no_periodic {
-        vec![CoordinateMetric::Linear; dim]
+        vec![CoordinateMetric::Linear; internal.dim]
     } else {
         internal.coordinate_metrics()
     };
-    let selected_frames = (frames - start).div_ceil(stride);
-    let mut one_d_data: Vec<Vec<f64>> = vec![Vec::with_capacity(selected_frames); dim];
-    for frame in internal.int_coords.iter().skip(start).step_by(stride) {
-        if frame.len() != dim {
-            fail("Inconsistent internal coordinate dimensions.");
-        }
-        for (i, value) in frame.iter().enumerate() {
-            one_d_data[i].push(*value);
-        }
-    }
-
     let used_frames = one_d_data[0].len();
-    let constant = if exact_constant {
-        FiniteSampleConstant::Exact
-    } else {
-        FiniteSampleConstant::Asymptotic
-    };
     let options = EntropyOptions {
         metrics: Some(&metrics),
-        constant,
+        constant: if exact_constant {
+            FiniteSampleConstant::Exact
+        } else {
+            FiniteSampleConstant::Asymptotic
+        },
         theiler_window,
     };
     let quasi_harmonic = QuasiHarmonicOptions {
@@ -289,69 +281,111 @@ fn main() {
         },
         periodic: periodic_correlation.unwrap_or_default(),
     };
-    let result = match estimator {
-        _ if legacy => legacy_entropy(&one_d_data, used_frames),
-        Estimator::NearestNeighbor => {
-            calculate_entropy(&one_d_data, used_frames, mie_order, &options)
-        }
-        Estimator::QuasiHarmonic => {
-            estimate_quasi_harmonic_entropy(&one_d_data, used_frames, &quasi_harmonic, &options)
-                .map(|entropy| entropy.quasi_harmonic)
-        }
-        Estimator::BoltzmannQuasiHarmonic => {
-            estimate_quasi_harmonic_entropy(&one_d_data, used_frames, &quasi_harmonic, &options)
-                .map(|entropy| entropy.boltzmann_quasi_harmonic)
+    const FAILED: &str = "Entropy calculation failed";
+
+    // The total, and for QH and BQH the first-order and correlation terms it
+    // is the sum of.
+    let (entropy, terms) = match estimator {
+        _ if legacy => (
+            or_fail(legacy_entropy(&one_d_data, used_frames), FAILED),
+            None,
+        ),
+        Estimator::NearestNeighbor => (
+            or_fail(
+                calculate_entropy(&one_d_data, used_frames, mie_order, &options),
+                FAILED,
+            ),
+            None,
+        ),
+        Estimator::QuasiHarmonic | Estimator::BoltzmannQuasiHarmonic => {
+            let result = or_fail(
+                estimate_quasi_harmonic_entropy(
+                    &one_d_data,
+                    used_frames,
+                    &quasi_harmonic,
+                    &options,
+                ),
+                FAILED,
+            );
+            if estimator == Estimator::QuasiHarmonic {
+                (
+                    result.quasi_harmonic,
+                    Some((result.first_order_gaussian, result.correlation)),
+                )
+            } else {
+                (
+                    result.boltzmann_quasi_harmonic,
+                    Some((result.first_order_boltzmann, result.correlation)),
+                )
+            }
         }
     };
-    let entropy = match result {
-        Ok(value) => value,
-        Err(err) => {
-            fail(format!("Entropy calculation failed: {err}"));
-        }
+
+    let describe = |index: usize| {
+        let kind = kinds[index].name();
+        // Atoms are numbered from 1, as in Amber and cpptraj.
+        let atoms = atoms[index]
+            .iter()
+            .map(|atom| (atom + 1).to_string())
+            .collect::<Vec<_>>()
+            .join("-");
+        format!("{}\t{kind}\t{atoms}", index + 1)
     };
     if per_coordinate {
-        let values = match estimator {
-            Estimator::NearestNeighbor => {
-                estimate_coordinate_entropy(&one_d_data, used_frames, mie_order, &options)
+        const PER_COORDINATE_FAILED: &str = "Per-coordinate entropy calculation failed";
+        if estimator == Estimator::NearestNeighbor {
+            let values = or_fail(
+                estimate_coordinate_entropy(&one_d_data, used_frames, mie_order, &options),
+                PER_COORDINATE_FAILED,
+            );
+            println!("coordinate\ttype\tatoms\tentropy");
+            for (index, value) in values.iter().enumerate() {
+                println!("{}\t{value}", describe(index));
             }
-            Estimator::QuasiHarmonic => estimate_coordinate_quasi_harmonic_entropy(
-                &one_d_data,
-                used_frames,
-                &quasi_harmonic,
-                &options,
-            )
-            .map(|entropy| entropy.quasi_harmonic),
-            Estimator::BoltzmannQuasiHarmonic => estimate_coordinate_quasi_harmonic_entropy(
-                &one_d_data,
-                used_frames,
-                &quasi_harmonic,
-                &options,
-            )
-            .map(|entropy| entropy.boltzmann_quasi_harmonic),
-        };
-        let values = match values {
-            Ok(values) => values,
-            Err(err) => {
-                fail(format!("Per-coordinate entropy calculation failed: {err}"));
-            }
-        };
-        let references = internal.phase_references();
-        println!("coordinate\ttype\tatoms\tentropy");
-        for (index, (atoms, value)) in internal.coordinate_atoms().iter().zip(&values).enumerate() {
-            let kind = match atoms.len() {
-                2 => "bond",
-                3 => "angle",
-                _ if references[index].is_some() => "phase angle",
-                _ => "torsion",
+        } else {
+            let shares = or_fail(
+                estimate_coordinate_quasi_harmonic_entropy(
+                    &one_d_data,
+                    used_frames,
+                    &quasi_harmonic,
+                    &options,
+                ),
+                PER_COORDINATE_FAILED,
+            );
+            let (totals, first_order) = if estimator == Estimator::QuasiHarmonic {
+                (&shares.quasi_harmonic, &shares.first_order_gaussian)
+            } else {
+                (
+                    &shares.boltzmann_quasi_harmonic,
+                    &shares.first_order_boltzmann,
+                )
             };
-            // Atoms are numbered from 1, as in Amber and cpptraj.
-            let atoms = atoms
-                .iter()
-                .map(|atom| (atom + 1).to_string())
-                .collect::<Vec<_>>()
-                .join("-");
-            println!("{}\t{kind}\t{atoms}\t{value}", index + 1);
+            println!("coordinate\ttype\tatoms\tentropy\tfirst_order\tcorrelation");
+            for index in 0..totals.len() {
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    describe(index),
+                    totals[index],
+                    first_order[index],
+                    shares.correlation[index]
+                );
+            }
         }
+    }
+    if mutual_information {
+        let values = or_fail(
+            estimate_coordinate_mutual_information(&one_d_data, used_frames, &options),
+            "Mutual information calculation failed",
+        );
+        println!("coordinate_a\tcoordinate_b\tmutual_information");
+        let pairs = (0..internal.dim).flat_map(|i| ((i + 1)..internal.dim).map(move |j| (i, j)));
+        for ((i, j), value) in pairs.zip(&values) {
+            println!("{}\t{}\t{value}", i + 1, j + 1);
+        }
+    }
+    if let Some((first_order, correlation)) = terms {
+        println!("First-order entropy = {first_order}");
+        println!("Correlation term = {correlation}");
     }
     if jacobian {
         // Over the same frames the entropy used.

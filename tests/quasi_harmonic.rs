@@ -961,7 +961,12 @@ mod cli {
     fn table(output: &Output) -> Vec<(String, String, f64)> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut lines = stdout.lines();
-        assert_eq!(lines.next(), Some("coordinate\ttype\tatoms\tentropy"));
+        // QH and BQH tables add first_order and correlation columns.
+        let header = lines.next().unwrap();
+        assert!(
+            header.starts_with("coordinate\ttype\tatoms\tentropy"),
+            "{header}"
+        );
         lines
             .take_while(|line| !line.contains('='))
             .enumerate()
@@ -1038,5 +1043,57 @@ mod cli {
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(stderr.contains(message), "{args:?}: {stderr}");
         }
+    }
+
+    /// The value of the `name = value` line of the output.
+    fn line_value(output: &Output, name: &str) -> f64 {
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{name} = ")))
+            .unwrap_or_else(|| panic!("no {name} line"))
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    fn quasi_harmonic_terms_add_up_to_the_total() {
+        let (top, traj) = chain_system("cli_terms");
+        for estimator in ["qh", "bqh"] {
+            let output = run(&top, &traj, &["--estimator", estimator]);
+            let total = entropy(&output);
+            let first_order = line_value(&output, "First-order entropy");
+            let correlation = line_value(&output, "Correlation term");
+            assert_eq!(first_order + correlation, total, "{estimator}");
+            assert!(correlation <= 0.0);
+        }
+        // The NN MIE has no such terms.
+        let stdout = String::from_utf8_lossy(&run(&top, &traj, &[]).stdout).to_string();
+        assert!(!stdout.contains("First-order"), "{stdout}");
+    }
+
+    #[test]
+    fn quasi_harmonic_tables_split_each_entropy_into_its_terms() {
+        let (top, traj) = chain_system("cli_term_columns");
+        let output = run(&top, &traj, &["--estimator", "bqh", "--per-coordinate"]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut lines = stdout.lines();
+        assert_eq!(
+            lines.next(),
+            Some("coordinate\ttype\tatoms\tentropy\tfirst_order\tcorrelation")
+        );
+        let mut first_order_sum = 0.0;
+        for line in lines.take_while(|line| !line.contains('=')) {
+            let fields: Vec<f64> = line
+                .split('\t')
+                .skip(3)
+                .map(|f| f.parse().unwrap())
+                .collect();
+            assert!(
+                (fields[0] - (fields[1] + fields[2])).abs() < 1e-12,
+                "{line}"
+            );
+            first_order_sum += fields[1];
+        }
+        assert!((first_order_sum - line_value(&output, "First-order entropy")).abs() < 1e-9);
     }
 }

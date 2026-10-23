@@ -5,7 +5,7 @@
 //! the GIL while it runs.
 
 #![allow(unsafe_op_in_unsafe_fn)]
-use crate::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
+use crate::bat_library::{BondSet, CoordinateKind, CoordinateOptions, InternalCoordinates};
 use crate::quasi_harmonic::{MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions};
 use crate::{CoordinateMetric, EntropyOptions, FiniteSampleConstant};
 use numpy::PyReadonlyArray2;
@@ -154,53 +154,21 @@ fn system_from_trajectory(
     stride: Option<usize>,
     options: CoordinateOptions,
 ) -> PyResult<System> {
-    let top = Path::new(top_path);
-    let traj = Path::new(traj_path);
     let start = start.unwrap_or(0);
-    let torsions_only = torsions_only.unwrap_or(false);
     let stride = stride.unwrap_or(1);
-    if stride == 0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "stride must be at least 1",
-        ));
-    }
-
-    let mut internal = InternalCoordinates::with_options(top, options).map_err(to_py_err)?;
+    let mut internal =
+        InternalCoordinates::with_options(Path::new(top_path), options).map_err(to_py_err)?;
     internal
-        .calculate_internal_coords(traj, stop.unwrap_or(usize::MAX), torsions_only)
+        .calculate_internal_coords(
+            Path::new(traj_path),
+            stop.unwrap_or(usize::MAX),
+            torsions_only.unwrap_or(false),
+        )
         .map_err(to_py_err)?;
-
-    let frame_count = internal.int_coords.len();
-    if frame_count == 0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "no frames read from trajectory",
-        ));
-    }
-    if start >= frame_count {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "start is beyond available frames",
-        ));
-    }
-    let dim = internal.int_coords[0].len();
-    if dim == 0 {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "no internal coordinates were generated",
-        ));
-    }
-
+    let one_d_data = internal
+        .columns(start, stride)
+        .map_err(|err| pyo3::exceptions::PyValueError::new_err(err.to_string()))?;
     let metrics = internal.coordinate_metrics();
-    let selected_frames = (frame_count - start).div_ceil(stride);
-    let mut one_d_data: Vec<Vec<f64>> = vec![Vec::with_capacity(selected_frames); dim];
-    for frame in internal.int_coords.iter().skip(start).step_by(stride) {
-        if frame.len() != dim {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "inconsistent internal coordinate dimensions",
-            ));
-        }
-        for (i, value) in frame.iter().enumerate() {
-            one_d_data[i].push(*value);
-        }
-    }
 
     // The Jacobian is only defined for the tree bond set with every coordinate;
     // otherwise the System has none to report.
@@ -219,12 +187,17 @@ fn system_from_trajectory(
         frames,
         metrics,
         mean_log_jacobian,
+        atoms: internal.coordinate_atoms(),
+        kinds: internal.coordinate_kinds(),
     })
 }
 
+/// The data, frame count and metrics of a System or an array. `periodic=False`
+/// measures every coordinate linearly, for this calculation only.
 fn one_d_data_from_py(
     data: &Bound<'_, PyAny>,
     periods: Option<Vec<Option<f64>>>,
+    periodic: bool,
 ) -> PyResult<(Vec<Vec<f64>>, usize, Vec<CoordinateMetric>)> {
     if let Ok(system) = data.extract::<PyRef<'_, System>>() {
         if periods.is_some() {
@@ -235,10 +208,15 @@ fn one_d_data_from_py(
         return Ok((
             system.one_d_data.clone(),
             system.frames,
-            system.metrics.clone(),
+            system.metrics_for(periodic),
         ));
     }
 
+    if periods.is_some() && !periodic {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "periods and periodic=False contradict each other; pass one",
+        ));
+    }
     let array = data.extract::<PyReadonlyArray2<f64>>()?;
     let (one_d_data, frames) = array_to_one_d_data(array);
     let metrics = metrics_from_periods(periods, one_d_data.len())?;
@@ -251,6 +229,20 @@ struct System {
     frames: usize,
     metrics: Vec<CoordinateMetric>,
     mean_log_jacobian: Option<f64>,
+    atoms: Vec<Vec<usize>>,
+    kinds: Vec<CoordinateKind>,
+}
+
+impl System {
+    /// The stored metrics, or every coordinate linear when `periodic` is
+    /// false.
+    fn metrics_for(&self, periodic: bool) -> Vec<CoordinateMetric> {
+        if periodic {
+            self.metrics.clone()
+        } else {
+            vec![CoordinateMetric::Linear; self.metrics.len()]
+        }
+    }
 }
 
 #[pymethods]
@@ -263,6 +255,32 @@ impl System {
     #[getter]
     fn coordinates(&self) -> usize {
         self.one_d_data.len()
+    }
+
+    /// Topology atom indices of each coordinate, counted from 0: two for a
+    /// bond, three for an angle (vertex in the middle), four for a torsion.
+    #[getter]
+    fn atoms(&self) -> Vec<Vec<usize>> {
+        self.atoms.clone()
+    }
+
+    /// The kind of each coordinate: "bond", "angle", "torsion" or "phase angle".
+    #[getter]
+    fn kinds(&self) -> Vec<&'static str> {
+        self.kinds.iter().map(|kind| kind.name()).collect()
+    }
+
+    /// For each coordinate, the index of the torsion it is a phase angle of,
+    /// or None.
+    #[getter]
+    fn phase_references(&self) -> Vec<Option<usize>> {
+        self.kinds
+            .iter()
+            .map(|kind| match kind {
+                CoordinateKind::PhaseAngle { reference } => Some(*reference),
+                _ => None,
+            })
+            .collect()
     }
 
     #[getter]
@@ -293,11 +311,12 @@ impl System {
         })
     }
 
-    #[pyo3(signature = (mie_order=None, exact_constant=false, theiler_window=0))]
+    #[pyo3(signature = (mie_order=None, periodic=true, exact_constant=false, theiler_window=0))]
     fn estimate_entropy(
         &self,
         py: Python<'_>,
         mie_order: Option<usize>,
+        periodic: bool,
         exact_constant: bool,
         theiler_window: usize,
     ) -> PyResult<f64> {
@@ -306,17 +325,18 @@ impl System {
                 &self.one_d_data,
                 self.frames,
                 mie_order.unwrap_or(2),
-                &entropy_options(&self.metrics, exact_constant, theiler_window),
+                &entropy_options(&self.metrics_for(periodic), exact_constant, theiler_window),
             )
             .map_err(pyo3::exceptions::PyValueError::new_err)
         })
     }
 
-    #[pyo3(signature = (mie_order=None, exact_constant=false, theiler_window=0))]
+    #[pyo3(signature = (mie_order=None, periodic=true, exact_constant=false, theiler_window=0))]
     fn estimate_coordinate_entropy(
         &self,
         py: Python<'_>,
         mie_order: Option<usize>,
+        periodic: bool,
         exact_constant: bool,
         theiler_window: usize,
     ) -> PyResult<Vec<f64>> {
@@ -325,19 +345,20 @@ impl System {
                 &self.one_d_data,
                 self.frames,
                 mie_order.unwrap_or(2),
-                &entropy_options(&self.metrics, exact_constant, theiler_window),
+                &entropy_options(&self.metrics_for(periodic), exact_constant, theiler_window),
             )
             .map_err(pyo3::exceptions::PyValueError::new_err)
         })
     }
 
     /// QH and BQH entropy; see the module function of the same name.
-    #[pyo3(signature = (histogram_bins=None, periodic_correlation="complex", exact_constant=false, theiler_window=0))]
+    #[pyo3(signature = (histogram_bins=None, periodic_correlation="complex", periodic=true, exact_constant=false, theiler_window=0))]
     fn estimate_quasi_harmonic_entropy(
         &self,
         py: Python<'_>,
         histogram_bins: Option<usize>,
         periodic_correlation: &str,
+        periodic: bool,
         exact_constant: bool,
         theiler_window: usize,
     ) -> PyResult<HashMap<&'static str, f64>> {
@@ -345,7 +366,7 @@ impl System {
             quasi_harmonic(
                 &self.one_d_data,
                 self.frames,
-                &self.metrics,
+                &self.metrics_for(periodic),
                 histogram_bins,
                 periodic_correlation,
                 exact_constant,
@@ -356,12 +377,13 @@ impl System {
 
     /// Each coordinate's share of the QH and BQH entropy; see the module
     /// function of the same name.
-    #[pyo3(signature = (histogram_bins=None, periodic_correlation="complex", exact_constant=false, theiler_window=0))]
+    #[pyo3(signature = (histogram_bins=None, periodic_correlation="complex", periodic=true, exact_constant=false, theiler_window=0))]
     fn estimate_coordinate_quasi_harmonic_entropy(
         &self,
         py: Python<'_>,
         histogram_bins: Option<usize>,
         periodic_correlation: &str,
+        periodic: bool,
         exact_constant: bool,
         theiler_window: usize,
     ) -> PyResult<HashMap<&'static str, Vec<f64>>> {
@@ -369,7 +391,7 @@ impl System {
             coordinate_quasi_harmonic(
                 &self.one_d_data,
                 self.frames,
-                &self.metrics,
+                &self.metrics_for(periodic),
                 histogram_bins,
                 periodic_correlation,
                 exact_constant,
@@ -378,10 +400,11 @@ impl System {
         })
     }
 
-    #[pyo3(signature = (exact_constant=false, theiler_window=0))]
+    #[pyo3(signature = (periodic=true, exact_constant=false, theiler_window=0))]
     fn estimate_coordinate_mutual_information(
         &self,
         py: Python<'_>,
+        periodic: bool,
         exact_constant: bool,
         theiler_window: usize,
     ) -> PyResult<Vec<f64>> {
@@ -389,7 +412,7 @@ impl System {
             crate::estimate_coordinate_mutual_information(
                 &self.one_d_data,
                 self.frames,
-                &entropy_options(&self.metrics, exact_constant, theiler_window),
+                &entropy_options(&self.metrics_for(periodic), exact_constant, theiler_window),
             )
             .map_err(pyo3::exceptions::PyValueError::new_err)
         })
@@ -434,16 +457,17 @@ fn load_system(
 
 /// Total entropy from a mutual information expansion of order `mie_order`
 /// (default 2; order 1 is the sum of marginal entropies).
-#[pyfunction(signature = (data, mie_order=None, periods=None, exact_constant=false, theiler_window=0))]
+#[pyfunction(signature = (data, mie_order=None, periods=None, periodic=true, exact_constant=false, theiler_window=0))]
 fn estimate_entropy(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
     mie_order: Option<usize>,
     periods: Option<Vec<Option<f64>>>,
+    periodic: bool,
     exact_constant: bool,
     theiler_window: usize,
 ) -> PyResult<f64> {
-    let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods)?;
+    let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
     py.allow_threads(move || {
         crate::calculate_entropy(
             &one_d_data,
@@ -458,16 +482,17 @@ fn estimate_entropy(
 /// Each coordinate's share of the order-`mie_order` entropy (default 2). The
 /// values sum to `estimate_entropy` at the same order; order 1 gives the
 /// marginal entropies.
-#[pyfunction(signature = (data, mie_order=None, periods=None, exact_constant=false, theiler_window=0))]
+#[pyfunction(signature = (data, mie_order=None, periods=None, periodic=true, exact_constant=false, theiler_window=0))]
 fn estimate_coordinate_entropy(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
     mie_order: Option<usize>,
     periods: Option<Vec<Option<f64>>>,
+    periodic: bool,
     exact_constant: bool,
     theiler_window: usize,
 ) -> PyResult<Vec<f64>> {
-    let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods)?;
+    let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
     py.allow_threads(move || {
         crate::estimate_coordinate_entropy(
             &one_d_data,
@@ -480,15 +505,16 @@ fn estimate_coordinate_entropy(
 }
 
 // Create python wrapper to take BAT coordinates and return a numpy array with the mutual information for each coordinate pair
-#[pyfunction(signature = (data, periods=None, exact_constant=false, theiler_window=0))]
+#[pyfunction(signature = (data, periods=None, periodic=true, exact_constant=false, theiler_window=0))]
 fn estimate_coordinate_mutual_information(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
     periods: Option<Vec<Option<f64>>>,
+    periodic: bool,
     exact_constant: bool,
     theiler_window: usize,
 ) -> PyResult<Vec<f64>> {
-    let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods)?;
+    let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
     py.allow_threads(move || {
         crate::estimate_coordinate_mutual_information(
             &one_d_data,
@@ -505,17 +531,20 @@ fn estimate_coordinate_mutual_information(
 /// uses nearest-neighbor marginals unless `histogram_bins` is given. Periodic
 /// coordinates enter the correlation matrix as e^(i phi) unless
 /// `periodic_correlation="centered"`.
-#[pyfunction(signature = (data, periods=None, histogram_bins=None, periodic_correlation="complex", exact_constant=false, theiler_window=0))]
+// Python keyword arguments, so the count is set by the public signature.
+#[allow(clippy::too_many_arguments)]
+#[pyfunction(signature = (data, periods=None, periodic=true, histogram_bins=None, periodic_correlation="complex", exact_constant=false, theiler_window=0))]
 fn estimate_quasi_harmonic_entropy(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
     periods: Option<Vec<Option<f64>>>,
+    periodic: bool,
     histogram_bins: Option<usize>,
     periodic_correlation: &str,
     exact_constant: bool,
     theiler_window: usize,
 ) -> PyResult<HashMap<&'static str, f64>> {
-    let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods)?;
+    let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
     py.allow_threads(move || {
         quasi_harmonic(
             &one_d_data,
@@ -532,17 +561,20 @@ fn estimate_quasi_harmonic_entropy(
 /// Each coordinate's share of the QH and BQH entropy, as a dict of lists with
 /// the keys of `estimate_quasi_harmonic_entropy`. Every list sums to the
 /// matching total; the correlation term is shared out as 1/2 (log C)_ii.
-#[pyfunction(signature = (data, periods=None, histogram_bins=None, periodic_correlation="complex", exact_constant=false, theiler_window=0))]
+// Python keyword arguments, so the count is set by the public signature.
+#[allow(clippy::too_many_arguments)]
+#[pyfunction(signature = (data, periods=None, periodic=true, histogram_bins=None, periodic_correlation="complex", exact_constant=false, theiler_window=0))]
 fn estimate_coordinate_quasi_harmonic_entropy(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
     periods: Option<Vec<Option<f64>>>,
+    periodic: bool,
     histogram_bins: Option<usize>,
     periodic_correlation: &str,
     exact_constant: bool,
     theiler_window: usize,
 ) -> PyResult<HashMap<&'static str, Vec<f64>>> {
-    let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods)?;
+    let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
     py.allow_threads(move || {
         coordinate_quasi_harmonic(
             &one_d_data,
