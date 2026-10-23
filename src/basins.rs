@@ -61,7 +61,7 @@ pub struct Basins {
     /// lower boundary within [0, P).
     pub labels: Vec<u32>,
     /// Boundaries between basins in [0, P), ascending; empty for one basin.
-    /// Basin i covers [boundaries[i], boundaries[i + 1]), and the last basin
+    /// Basin i covers `[boundaries[i], boundaries[i + 1])`, and the last basin
     /// wraps around through P.
     pub boundaries: Vec<f64>,
     /// Fraction of the frames in each basin.

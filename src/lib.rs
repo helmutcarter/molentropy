@@ -20,6 +20,10 @@
 //!   and of pairs (up to sets of four), combined by a truncated expansion.
 //!   Makes no assumption about the shape of any distribution, but the sum of
 //!   many pairwise terms is noisy.
+//! - **Split**, [`split::estimate_split_entropy`]: soft torsions (about
+//!   rotatable bonds) by a nearest-neighbor estimate, the stiff coordinates by
+//!   a Gaussian, plus a coupling term; for molecules with several coupled
+//!   rotatable bonds.
 //! - **Quasi-harmonic (QH)**, the same function as BQH: a Gaussian fit to
 //!   every coordinate. Fast, but overestimates the entropy of multiwell
 //!   torsions.
@@ -93,6 +97,8 @@
 //!   and the bond-angle-torsion coordinates, with the options in
 //!   [`bat_library::CoordinateOptions`].
 //! - [`quasi_harmonic`]: the QH and BQH estimators.
+//! - [`split`]: the split (soft/hard) estimator, and [`basins`]: basin
+//!   detection for periodic coordinates.
 //! - [`legacy`]: the reproduction of the original Python implementation.
 //! - [`pyo3_api`]: the Python extension module.
 
