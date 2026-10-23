@@ -103,6 +103,7 @@ use kiddo::SquaredEuclidean;
 use rayon::prelude::*;
 use std::num::NonZero;
 
+pub mod basins;
 pub mod bat_library;
 pub mod legacy;
 pub mod pyo3_api;
