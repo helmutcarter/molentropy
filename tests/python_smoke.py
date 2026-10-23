@@ -202,10 +202,20 @@ def check_coordinate_options():
         assert (period is not None) == (len(atoms) == 4), (kind, period)
     assert "phase angle" in phase.kinds and "phase angle" not in plain.kinds
 
-    linear = nn_entropy.load_system(top, traj, periodic=False)
-    assert all(p is None for p in linear.periods)
-    assert linear.data == phase.data
-    assert linear.estimate_entropy() != phase.estimate_entropy()
+    # periodic=False measures every coordinate linearly for one calculation;
+    # the System's own periods are unchanged.
+    linear = phase.estimate_entropy(periodic=False)
+    assert linear != phase.estimate_entropy()
+    assert nn_entropy.estimate_entropy(phase, periodic=False) == linear
+    assert any(p is not None for p in phase.periods)
+    array = np.array(phase.data)
+    assert nn_entropy.estimate_entropy(array, periodic=False) == nn_entropy.estimate_entropy(array)
+    try:
+        nn_entropy.estimate_entropy(array, periods=phase.periods, periodic=False)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("periods and periodic=False together should raise ValueError")
 
     tree = nn_entropy.load_system(top, traj, tree_bonds=True, phase_angles=True)
     assert tree.coordinates > plain.coordinates, "tree bonds should add X-H bonds"
