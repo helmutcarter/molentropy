@@ -413,3 +413,267 @@ fn invalid_settings_are_refused() {
         "{err}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+
+mod cli {
+    use std::path::{Path, PathBuf};
+    use std::process::{Command, Output};
+
+    use super::common::Rng;
+    use super::common::amber::{
+        CHAIN_ATOMS, CHAIN_BONDS, NetcdfOptions, Topology, chain_frames, concat_frames,
+        scratch_path, write_netcdf, write_prmtop,
+    };
+    use nn_entropy::EntropyOptions;
+    use nn_entropy::bat_library::InternalCoordinates;
+    use nn_entropy::split::{
+        Coupling, SoftSelection, SplitOptions, StateDefinition, StateOptions,
+        estimate_split_entropy,
+    };
+
+    /// A chain molecule (three rotatable bonds) with more frames than
+    /// coordinates.
+    fn chain(name: &str) -> (PathBuf, PathBuf) {
+        let mut topology = Topology::default();
+        topology.push_molecule("BUT", &CHAIN_ATOMS, &CHAIN_BONDS);
+        let top = scratch_path(&format!("split_{name}.parm7"));
+        let traj = scratch_path(&format!("split_{name}.nc"));
+        write_prmtop(&top, &topology);
+        let mut rng = Rng::new(0x5b17);
+        let frames = chain_frames(&mut rng, 80, [0.0, 0.0, 0.0]);
+        write_netcdf(&traj, &concat_frames(&[&frames]), NetcdfOptions::default());
+        (top, traj)
+    }
+
+    fn run(top: &Path, traj: &Path, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+            .args([top.to_str().unwrap(), traj.to_str().unwrap()])
+            .args(args)
+            .output()
+            .expect("failed to run CLI")
+    }
+
+    fn lines(output: &Output) -> Vec<String> {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn value(lines: &[String], name: &str) -> String {
+        lines
+            .iter()
+            .find_map(|line| line.strip_prefix(&format!("{name} = ")))
+            .unwrap_or_else(|| panic!("no {name} line in {lines:?}"))
+            .to_string()
+    }
+
+    fn library(
+        top: &Path,
+        traj: &Path,
+        configure: impl Fn(&mut SplitOptions, &InternalCoordinates),
+    ) -> nn_entropy::split::SplitEntropy {
+        let mut internal = InternalCoordinates::new(top).unwrap();
+        internal
+            .calculate_internal_coords(traj, usize::MAX, false)
+            .unwrap();
+        let data = internal.columns(0, 1).unwrap();
+        let metrics = internal.coordinate_metrics();
+        let soft = internal.soft_torsions();
+        let mut settings = SplitOptions::new(SoftSelection::Indices(&soft));
+        configure(&mut settings, &internal);
+        let options = EntropyOptions {
+            metrics: Some(&metrics),
+            ..Default::default()
+        };
+        estimate_split_entropy(&data, data[0].len(), &settings, &options).unwrap()
+    }
+
+    #[test]
+    fn default_split_output_matches_the_library() {
+        let (top, traj) = chain("cli_default");
+        let lines = lines(&run(&top, &traj, &["--estimator", "split"]));
+        let expected = library(&top, &traj, |_, _| {});
+        let numbers: Vec<String> = expected
+            .soft_coordinates
+            .iter()
+            .map(|i| (i + 1).to_string())
+            .collect();
+        assert_eq!(value(&lines, "Soft coordinates"), numbers.join(","));
+        assert_eq!(
+            value(&lines, "Soft entropy").parse::<f64>().unwrap(),
+            expected.soft
+        );
+        assert_eq!(
+            value(&lines, "Hard entropy").parse::<f64>().unwrap(),
+            expected.hard
+        );
+        assert_eq!(
+            value(&lines, "Coupling term").parse::<f64>().unwrap(),
+            expected.coupling
+        );
+        assert_eq!(
+            lines.last().unwrap(),
+            &format!("Total entropy = {}", expected.total)
+        );
+        assert_eq!(numbers.len(), 3);
+    }
+
+    #[test]
+    fn per_state_output_lists_the_states() {
+        let (top, traj) = chain("cli_states");
+        let lines = lines(&run(
+            &top,
+            &traj,
+            &[
+                "--estimator",
+                "split",
+                "--coupling",
+                "states",
+                "--min-state-frames",
+                "10",
+            ],
+        ));
+        let expected = library(&top, &traj, |settings, _| {
+            settings.coupling = Coupling::PerState(StateOptions {
+                min_frames: 10,
+                ..Default::default()
+            });
+        });
+        let states = expected.states.unwrap();
+        assert!(lines.contains(&"state\tbasins\tframes\tpopulation\thard_entropy".to_string()));
+        assert_eq!(
+            value(&lines, "Dropped frames"),
+            states.dropped_frames.to_string()
+        );
+        assert_eq!(
+            value(&lines, "Total entropy").parse::<f64>().unwrap(),
+            expected.total
+        );
+    }
+
+    #[test]
+    fn soft_and_state_lists_count_from_one() {
+        let (top, traj) = chain("cli_lists");
+        let lines = lines(&run(
+            &top,
+            &traj,
+            &[
+                "--estimator",
+                "split",
+                "--soft",
+                "8,10",
+                "--coupling",
+                "states",
+                "--state-torsions",
+                "8",
+                "--min-state-frames",
+                "10",
+            ],
+        ));
+        assert_eq!(value(&lines, "Soft coordinates"), "8,10");
+        let expected = library(&top, &traj, |settings, _| {
+            settings.soft = SoftSelection::Indices(&[7, 9]);
+            settings.coupling = Coupling::PerState(StateOptions {
+                definition: StateDefinition::Detected {
+                    defining: Some(&[7]),
+                    exclude: &[],
+                },
+                min_frames: 10,
+                ..Default::default()
+            });
+        });
+        assert_eq!(
+            value(&lines, "Total entropy").parse::<f64>().unwrap(),
+            expected.total
+        );
+        // Detection runs on every torsion.
+        lines_ok(&run(
+            &top,
+            &traj,
+            &["--estimator", "split", "--soft", "detect"],
+        ));
+    }
+
+    fn lines_ok(output: &Output) {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn split_flags_are_checked() {
+        let (top, traj) = chain("cli_rejected");
+        for (args, message) in [
+            (
+                &["--coupling", "none"][..],
+                "--coupling applies only to --estimator split",
+            ),
+            (
+                &["--estimator", "split", "--soft", "99"][..],
+                "--soft coordinate 99 is beyond",
+            ),
+            (
+                &["--estimator", "split", "--soft", "0"][..],
+                "invalid --soft value",
+            ),
+            (
+                &[
+                    "--estimator",
+                    "split",
+                    "--coupling",
+                    "states",
+                    "--soft-features",
+                    "cossin",
+                ][..],
+                "--soft-features applies only",
+            ),
+            (
+                &["--estimator", "split", "--state-torsions", "auto"][..],
+                "apply only to --coupling states",
+            ),
+            (
+                &["--estimator", "split", "--per-coordinate"][..],
+                "cannot be combined with --estimator split",
+            ),
+            (
+                &["--estimator", "split", "--no-phase-angles"][..],
+                "--soft topology needs phase angles",
+            ),
+            (
+                &[
+                    "--estimator",
+                    "split",
+                    "--soft-estimator",
+                    "joint",
+                    "--mie-order",
+                    "3",
+                ][..],
+                "--mie-order applies only",
+            ),
+            (
+                &["--estimator", "split", "--histogram-bins", "20"][..],
+                "--histogram-bins applies only",
+            ),
+            (
+                &["--estimator", "split", "--coupling", "maybe"][..],
+                "--coupling must be one of gaussian, states, none",
+            ),
+        ] {
+            let output = run(&top, &traj, args);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(output.status.code(), Some(1), "{args:?}: {stderr}");
+            assert!(stderr.contains(message), "{args:?}: {stderr}");
+        }
+    }
+}
