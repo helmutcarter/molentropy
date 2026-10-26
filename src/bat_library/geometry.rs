@@ -247,6 +247,43 @@ mod tests {
     }
 
     #[test]
+    fn the_legacy_formula_gives_nan_for_that_straight_angle() {
+        // The acos form is kept for --legacy, so it keeps the NaN the standard
+        // form avoids on the triple above.
+        let a1 = [9.532_804_5_f32, 17.210_114, 25.240_194];
+        let a2 = [9.169_646_f32, 16.730_146, 24.347_971];
+        let a3 = [8.564_333_f32, 15.930_14, 22.860_813];
+        assert!(legacy_bond_angle_f32(a1, a2, a3).is_nan());
+    }
+
+    #[test]
+    fn a_torsion_about_a_straight_angle_is_finite_but_undefined() {
+        // With a2, a3 and a4 collinear, both cross products in the formula
+        // vanish and atan2(0, 0) returns 0 or +-pi by the signs of the zeros.
+        // The value is finite, so nothing downstream sees a NaN, but it says
+        // nothing about the geometry: it does not follow a1 around the axis.
+        let line = |x: f64| [x, 2.0 * x, -x];
+        let values: Vec<f64> = (0..8)
+            .map(|k| {
+                let turn = k as f64 * PI / 4.0;
+                let a1 = [1.0 + turn.cos(), turn.sin(), 3.0];
+                torsion_angle(a1, line(0.0), line(1.0), line(2.5))
+            })
+            .collect();
+        for value in &values {
+            assert!(
+                *value == 0.0 || (value.abs() - PI).abs() < 1e-15,
+                "{values:?}"
+            );
+        }
+        for value in [torsion_angle, legacy_torsion_angle]
+            .map(|torsion| torsion(line(-1.0), line(0.0), line(1.0), [3.0, 1.0, 0.0]))
+        {
+            assert!(value == 0.0 || (value.abs() - PI).abs() < 1e-15);
+        }
+    }
+
+    #[test]
     fn straight_angles_along_many_directions_are_finite() {
         // A deterministic sweep of exactly collinear triples. With the old acos
         // form roughly a quarter of these came out NaN in f64 and half in f32.

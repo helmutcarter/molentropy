@@ -1088,7 +1088,9 @@ fn methoxy_and_trifluoromethyl_groups_are_symmetric_rotors() {
 #[test]
 fn a_linear_group_gives_finite_coordinates() {
     // 1-Butyne: C2-C3#C4-H is nearly collinear, so torsions about C3 and C4
-    // are close to undefined. They must still come out finite.
+    // are close to undefined. They must still come out finite: finite, not
+    // meaningful, since an exactly collinear torsion is an arbitrary 0 or pi
+    // (see geometry.rs). With --legacy, a straight bond angle can be NaN.
     let internal = jittered_system(
         "linear_butyne",
         &BUTYNE_ATOMS,
