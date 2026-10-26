@@ -9,8 +9,9 @@ use crate::basins::{BasinOptions, detect_basins as detect_basins_impl};
 use crate::bat_library::{BondSet, CoordinateKind, CoordinateOptions, InternalCoordinates};
 use crate::quasi_harmonic::{MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions};
 use crate::split::{
-    Coupling, HardEstimator, SoftEstimator, SoftFeatures, SoftSelection, SplitEntropy,
-    SplitOptions, StateDefinition, StateOptions, estimate_split_entropy as split_impl,
+    Coupling, HardEstimator, LARGE_SOFT_SET, SoftEstimator, SoftFeatures, SoftSelection,
+    SplitEntropy, SplitOptions, StateDefinition, StateOptions,
+    estimate_split_entropy as split_impl, large_soft_set_warning,
 };
 use crate::{CoordinateMetric, EntropyOptions, FiniteSampleConstant};
 use numpy::PyReadonlyArray2;
@@ -368,6 +369,14 @@ impl SplitArguments {
 
 /// `SplitEntropy` as a dict.
 fn split_to_dict(py: Python<'_>, result: SplitEntropy) -> PyResult<PyObject> {
+    if result.soft_coordinates.len() > LARGE_SOFT_SET {
+        PyErr::warn_bound(
+            py,
+            &py.get_type_bound::<pyo3::exceptions::PyUserWarning>(),
+            &large_soft_set_warning(result.soft_coordinates.len()),
+            1,
+        )?;
+    }
     let dict = PyDict::new_bound(py);
     dict.set_item("total", result.total)?;
     dict.set_item("soft", result.soft)?;
@@ -635,7 +644,7 @@ impl System {
     /// Split entropy; see the module function of the same name. `soft=None`
     /// uses the System's soft torsions.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="complex", state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periodic=true, exact_constant=false, theiler_window=0))]
+    #[pyo3(signature = (soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="cossin", state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periodic=true, exact_constant=false, theiler_window=0))]
     fn estimate_split_entropy(
         &self,
         py: Python<'_>,
@@ -876,7 +885,7 @@ fn estimate_coordinate_quasi_harmonic_entropy(
 /// "detect", or a list of coordinate indices from 0; None means "topology"
 /// for a System and "detect" for an array.
 #[allow(clippy::too_many_arguments)]
-#[pyfunction(signature = (data, soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="complex", state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periods=None, periodic=true, exact_constant=false, theiler_window=0))]
+#[pyfunction(signature = (data, soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="cossin", state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periods=None, periodic=true, exact_constant=false, theiler_window=0))]
 fn estimate_split_entropy(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,

@@ -34,6 +34,19 @@ use crate::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_joint_entropy, resolve_input,
 };
 
+/// Above this many soft coordinates the front ends warn that the split
+/// estimator is outside its validated range. It was accurate to about 1 nat
+/// with up to 15 soft torsions (hexadecane), but folded peptides with 40 to
+/// 50 were off by tens of nats, where plain BQH did better.
+pub const LARGE_SOFT_SET: usize = 20;
+
+/// The front ends' warning for a soft set larger than [`LARGE_SOFT_SET`].
+pub fn large_soft_set_warning(soft: usize) -> String {
+    format!(
+        "{soft} soft coordinates, more than the {LARGE_SOFT_SET} the split estimator was validated for; for folded or compact molecules, compare with BQH"
+    )
+}
+
 /// Which coordinates are soft.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SoftSelection<'a> {
@@ -83,9 +96,9 @@ pub enum HardEstimator {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SoftFeatures {
     /// As e^(i phi): one complex entry each.
-    #[default]
     Complex,
     /// As cos(phi) and sin(phi): two real entries each.
+    #[default]
     CosSin,
 }
 
@@ -172,8 +185,9 @@ impl<'a> SplitOptions<'a> {
     /// The default settings for the soft set `soft`: NN MIE-2 for the soft
     /// coordinates; QH for the hard ones, with hard periodic coordinates
     /// centered on their circular mean; and Gaussian coupling with soft
-    /// torsions as e^(i phi). These scored best against the butane TI/MBAR
-    /// references; see the validation page of the user guide.
+    /// torsions as cos(phi) and sin(phi). These scored best overall against
+    /// MBAR references for 18 small molecules; see the validation page of the
+    /// user guide.
     pub fn new(soft: SoftSelection<'a>) -> Self {
         Self {
             soft,
@@ -184,7 +198,7 @@ impl<'a> SplitOptions<'a> {
                 ..Default::default()
             },
             coupling: Coupling::Gaussian {
-                features: SoftFeatures::Complex,
+                features: SoftFeatures::default(),
             },
             basins: BasinOptions::default(),
         }

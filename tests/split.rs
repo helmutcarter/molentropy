@@ -222,6 +222,17 @@ fn gaussian_coupling_recovers_a_linear_dependence_on_cos_and_sin() {
 }
 
 #[test]
+fn the_default_coupling_takes_soft_torsions_as_cos_and_sin() {
+    let settings = SplitOptions::new(SoftSelection::Indices(&[]));
+    assert!(matches!(
+        settings.coupling,
+        Coupling::Gaussian {
+            features: SoftFeatures::CosSin
+        }
+    ));
+}
+
+#[test]
 fn independent_sets_have_almost_no_gaussian_coupling() {
     let mut rng = Rng::new(76);
     let n = 50_000;
@@ -430,7 +441,7 @@ mod cli {
     use nn_entropy::EntropyOptions;
     use nn_entropy::bat_library::InternalCoordinates;
     use nn_entropy::split::{
-        Coupling, SoftSelection, SplitOptions, StateDefinition, StateOptions,
+        Coupling, LARGE_SOFT_SET, SoftSelection, SplitOptions, StateDefinition, StateOptions,
         estimate_split_entropy,
     };
 
@@ -558,6 +569,34 @@ mod cli {
             value(&lines, "Total entropy").parse::<f64>().unwrap(),
             expected.total
         );
+    }
+
+    #[test]
+    fn a_large_soft_set_is_warned_about() {
+        // The bundled fixture has 29 coordinates, enough to make them all soft.
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let list = (1..=29)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let output = run(
+            &fixtures.join("test.parm7"),
+            &fixtures.join("test.nc"),
+            &[
+                "--estimator",
+                "split",
+                "--soft",
+                &list,
+                "--coupling",
+                "none",
+            ],
+        );
+        lines_ok(&output);
+        const { assert!(29 > LARGE_SOFT_SET) };
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Warning: 29 soft coordinates"));
+        let (top, traj) = chain("cli_small_soft");
+        let small = run(&top, &traj, &["--estimator", "split"]);
+        assert!(!String::from_utf8_lossy(&small.stderr).contains("soft coordinates"));
     }
 
     #[test]

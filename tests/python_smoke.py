@@ -16,6 +16,7 @@ Run against an installed wheel:
 
 import math
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -323,6 +324,12 @@ def check_split():
             pass
         else:
             raise AssertionError(f"{bad} should raise ValueError")
+
+    many = rng.uniform(0, 2 * math.pi, size=(22, 2000))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        nn_entropy.estimate_split_entropy(many, soft=list(range(21)), coupling="none")
+    assert any("21 soft coordinates" in str(w.message) for w in caught), [str(w.message) for w in caught]
 
     fixtures = Path(__file__).resolve().parent / "fixtures"
     system = nn_entropy.load_system(str(fixtures / "test.parm7"), str(fixtures / "test.nc"))

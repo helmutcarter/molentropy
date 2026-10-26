@@ -8,8 +8,8 @@ use nn_entropy::quasi_harmonic::{
     estimate_coordinate_quasi_harmonic_entropy, estimate_quasi_harmonic_entropy,
 };
 use nn_entropy::split::{
-    Coupling, HardEstimator, SoftEstimator, SoftFeatures, SoftSelection, SplitOptions,
-    StateDefinition, StateOptions, estimate_split_entropy,
+    Coupling, HardEstimator, LARGE_SOFT_SET, SoftEstimator, SoftFeatures, SoftSelection,
+    SplitOptions, StateDefinition, StateOptions, estimate_split_entropy, large_soft_set_warning,
 };
 use nn_entropy::{
     CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy,
@@ -544,6 +544,12 @@ fn main() {
                     .join(",")
             };
             println!("Soft coordinates = {}", numbers(&result.soft_coordinates));
+            if result.soft_coordinates.len() > LARGE_SOFT_SET {
+                eprintln!(
+                    "Warning: {}",
+                    large_soft_set_warning(result.soft_coordinates.len())
+                );
+            }
             if let Some(states) = &result.states {
                 println!("state\tbasins\tframes\tpopulation\thard_entropy");
                 for (index, state) in states.states.iter().enumerate() {
