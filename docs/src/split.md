@@ -24,7 +24,7 @@ In Rust, `InternalCoordinates::soft_torsions()` gives the topological set; in Py
 
 `--coupling` (`coupling=`) chooses how the dependence between the sets is accounted for:
 
-- **`gaussian`** (the default): the Gaussian mutual information between the sets, `½ [ln|C(S∪H)| − ln|C(S)| − ln|C(H)|]`, with soft torsions entering the correlation matrix as `e^{iφ}` (`--soft-features complex`, the default) or as cos φ and sin φ (`cossin`).
+- **`gaussian`** (the default): the Gaussian mutual information between the sets, `½ [ln|C(S∪H)| − ln|C(S)| − ln|C(H)|]`, with soft torsions entering the correlation matrix as cos φ and sin φ (`--soft-features cossin`, the default) or as `e^{iφ}` (`complex`). As two real columns, cos φ and sin φ can correlate with a hard coordinate separately: a bond angle that responds to trans against gauche but not to which gauche correlates with cos φ alone, which the single complex entry partly averages away.
 - **`states`**: the hard entropy is computed within each conformational state of the soft torsions, the states' entropies are averaged with their populations, and the coupling is the difference from the hard entropy over all frames. A state is the combination of basins of the state-defining torsions: by default (`--state-torsions auto`) the soft torsions with more than one basin, excluding symmetric rotors, whose basins are equivalent; or a list. States with fewer than `--min-state-frames` frames (300 by default) or than the number of hard coordinates plus 2 are dropped and the others' populations renormalized; the output lists every state and the dropped frames, and warns when more than 5% are dropped. In Python, `state_labels` gives each frame's state directly.
 - **`none`**: the sets are treated as independent.
 
@@ -44,10 +44,13 @@ The result is deterministic and does not depend on where the period starts.
 
 ## Choosing settings
 
-On the butane end states, the defaults scored best of 96 configurations, with an RMSE of 0.063 nats against thermodynamic integration; see [Validation](validation.md#split-estimator). Butane has a single multi-basin torsion, which BQH also handles well, so plain BQH scores better there; the split estimator is meant for molecules with several coupled rotatable bonds, where the pairwise terms of the MIE and the single Gaussian of QH both fall short.
+The defaults (topological soft set, MIE-2 soft, centered QH hard, Gaussian coupling with cos/sin features) were chosen on 18 small molecules and 4 peptide systems with MBAR references; see [Validation](validation.md#small-molecules-and-peptides-at-300-k).
 
-- **Per-state coupling** conditions on discrete states. It needs enough frames per state, and a Gaussian fitted to a small state is biased; on butane it was 0.03 nats worse than Gaussian coupling.
-- **The joint soft estimator** has no truncation error but its bias grows with the number of soft torsions; keep it to a few.
+- **Small flexible molecules** (up to about 15 soft torsions): on 15 such molecules the defaults were within 0.6 nats on 11 and 1.6 at worst, and beat both QH and BQH on all but biphenyl, where they tied with BQH. (With a benzamide's ring torsions switched off as well, QH was better.) With one multi-basin torsion, as in butane, plain BQH is about as good.
+- **Per-state coupling** (`--coupling states`) is more accurate when there are a few well-sampled conformers: about 4 or fewer state-defining torsions and plenty of frames in each state. It cut the error from 0.31 to 0.02 nats on biphenyl and from 1.6 to 0.3 on a nitrobenzamide. With more states it drops frames or fails, and on hexane it was 0.5 nats worse than Gaussian coupling.
+- **Folded or compact molecules**: on a folded β-hairpin (chignolin) the split estimator overestimated the entropy loss by 25–160 nats, and plain BQH did better (5 nats in implicit solvent). A zwitterion collapsed into a salt bridge was off by 1.8 nats with only 4 soft torsions. Above 20 soft coordinates the CLI and Python warn (`LARGE_SOFT_SET` in Rust); compare with BQH there.
+- **Flexible rings**: torsions about ring bonds are hard under the topological rule, so a puckering ring falls to the Gaussian; on cyclohexane this was within 0.6 nats. Do not combine `--soft detect` with MIE-2 there: detection makes the ring torsions soft, and the pairwise MIE cannot represent the ring closure that couples them (8–10 nats off). The joint soft estimator handled it (0.14 nats).
+- **The joint soft estimator** has no truncation error but its bias grows with the number of soft torsions, and it is limited to 8.
 - **Detection** can call a rotatable bond stuck in one well hard, and a stiff torsion that samples two wells soft; the topological rule cannot.
 
 `--per-coordinate` and `--mutual-information` do not apply to the split estimator.
