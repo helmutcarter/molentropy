@@ -1,18 +1,18 @@
 use std::env;
 use std::path::Path;
 
-use nn_entropy::bat_library::{BondSet, CoordinateOptions, Geometry, InternalCoordinates};
-use nn_entropy::legacy::legacy_entropy;
-use nn_entropy::quasi_harmonic::{
+use molentropy::bat_library::{BondSet, CoordinateOptions, Geometry, InternalCoordinates};
+use molentropy::legacy::legacy_entropy;
+use molentropy::quasi_harmonic::{
     MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions,
     estimate_coordinate_quasi_harmonic_entropy, estimate_quasi_harmonic_entropy,
 };
-use nn_entropy::split::{
+use molentropy::split::{
     Coupling, HardEstimator, LARGE_SOFT_SET, SoftEstimator, SoftFeatures, SoftSelection,
     SplitOptions, StateDefinition, StateOptions, estimate_coordinate_split_entropy,
     estimate_split_entropy, large_soft_set_warning,
 };
-use nn_entropy::{
+use molentropy::{
     CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy,
     estimate_coordinate_entropy, estimate_coordinate_mutual_information,
 };

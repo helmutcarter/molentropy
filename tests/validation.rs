@@ -6,7 +6,7 @@
 
 mod common;
 
-use nn_entropy::{
+use molentropy::{
     CoordinateMetric, EntropyOptions, FiniteSampleConstant, calc_joint_nn, calculate_entropy,
     estimate_coordinate_entropy, estimate_coordinate_mutual_information,
 };

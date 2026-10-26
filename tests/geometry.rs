@@ -10,9 +10,9 @@ mod common;
 
 use std::path::PathBuf;
 
-use nn_entropy::CoordinateMetric;
-use nn_entropy::bat_library::InternalCoordinates;
-use nn_entropy::bat_library::geometry::{
+use molentropy::CoordinateMetric;
+use molentropy::bat_library::InternalCoordinates;
+use molentropy::bat_library::geometry::{
     bond_angle, bond_length, internal_coordinates, torsion_angle,
 };
 

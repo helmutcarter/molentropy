@@ -11,7 +11,7 @@
 mod common;
 
 use common::{Rng, brute_force_log_nn_sum_windowed, normal_entropy};
-use nn_entropy::{
+use molentropy::{
     CoordinateMetric, EntropyOptions, FiniteSampleConstant, calc_joint_nn,
     calc_joint_nn_with_window, calculate_entropy, estimate_coordinate_entropy,
     estimate_coordinate_mutual_information,

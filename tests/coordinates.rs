@@ -17,7 +17,7 @@ use common::amber::{
     CHAIN_ATOMS, CHAIN_BONDS, NetcdfOptions, Topology, chain_frames, concat_frames, scratch_path,
     write_netcdf, write_prmtop,
 };
-use nn_entropy::bat_library::{BondSet, CoordinateKind, CoordinateOptions, InternalCoordinates};
+use molentropy::bat_library::{BondSet, CoordinateKind, CoordinateOptions, InternalCoordinates};
 
 const FRAMES: usize = 40;
 

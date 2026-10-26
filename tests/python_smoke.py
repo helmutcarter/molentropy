@@ -1,4 +1,4 @@
-"""Smoke test for the built `nn_entropy` Python extension.
+"""Smoke test for the built `molentropy` Python extension.
 
 `cargo test` exercises the Rust core but never links the cdylib against
 libpython, so this checks the parts only the wheel can prove: that the module
@@ -10,7 +10,7 @@ Expected values are derived analytically below, not copied from a previous run.
 Run against an installed wheel:
 
     maturin build --out dist
-    pip install --no-index --find-links dist nn_entropy
+    pip install --no-index --find-links dist molentropy
     python tests/python_smoke.py
 """
 
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-import nn_entropy
+import molentropy
 
 EULER_MASCHERONI = float(np.euler_gamma)
 
@@ -49,10 +49,10 @@ REMOVED_EXPORTS = {
 
 
 def check_exports():
-    missing = EXPECTED_EXPORTS - set(dir(nn_entropy))
+    missing = EXPECTED_EXPORTS - set(dir(molentropy))
     if missing:
         raise AssertionError(f"module is missing exports: {sorted(missing)}")
-    stale = REMOVED_EXPORTS & set(dir(nn_entropy))
+    stale = REMOVED_EXPORTS & set(dir(molentropy))
     if stale:
         raise AssertionError(f"module still exports removed names: {sorted(stale)}")
     print(f"exports: all {len(EXPECTED_EXPORTS)} entry points present")
@@ -66,7 +66,7 @@ def check_closed_form_entropy():
         ln(V_1) + ln(N) + gamma = ln(2) + ln(2) + gamma = ln(4) + gamma.
     """
     data = np.array([[0.0, 1.0]])
-    got = nn_entropy.estimate_entropy(data, mie_order=1)
+    got = molentropy.estimate_entropy(data, mie_order=1)
     want = math.log(4.0) + EULER_MASCHERONI
     assert abs(got - want) < 1e-12, f"estimate_entropy: got {got!r}, want {want!r}"
     print(f"order-1 closed form: {got!r}")
@@ -78,10 +78,10 @@ def check_exact_constant_closed_form():
     For N = 2 that term is H_1 = 1, so the estimate is ln(2) + 1.
     """
     data = np.array([[0.0, 1.0]])
-    got = nn_entropy.estimate_entropy(data, mie_order=1, exact_constant=True)
+    got = molentropy.estimate_entropy(data, mie_order=1, exact_constant=True)
     want = math.log(2.0) + 1.0
     assert abs(got - want) < 1e-12, f"exact constant: got {got!r}, want {want!r}"
-    per_coordinate = nn_entropy.estimate_coordinate_entropy(
+    per_coordinate = molentropy.estimate_coordinate_entropy(
         data, mie_order=1, exact_constant=True
     )
     assert abs(per_coordinate[0] - want) < 1e-12, per_coordinate
@@ -97,16 +97,16 @@ def check_theiler_window_closed_form():
     = 2 ln(2) + (1.5 + 1 + 1 + 1.5) / 4.
     """
     data = np.array([[0.0, 1.0, 2.0, 3.0]])
-    got = nn_entropy.estimate_entropy(
+    got = molentropy.estimate_entropy(
         data, mie_order=1, exact_constant=True, theiler_window=1
     )
     want = 2.0 * math.log(2.0) + 1.25
     assert abs(got - want) < 1e-12, f"theiler window: got {got!r}, want {want!r}"
-    assert nn_entropy.estimate_entropy(data, mie_order=1) == nn_entropy.estimate_entropy(
+    assert molentropy.estimate_entropy(data, mie_order=1) == molentropy.estimate_entropy(
         data, mie_order=1, theiler_window=0
     )
     try:
-        nn_entropy.estimate_entropy(data, mie_order=1, theiler_window=2)
+        molentropy.estimate_entropy(data, mie_order=1, theiler_window=2)
     except ValueError:
         pass
     else:
@@ -118,8 +118,8 @@ def check_coordinate_entropies_sum_to_total():
     """The order-1 total is by definition the sum of the per-coordinate values."""
     rng = np.random.default_rng(0)
     data = rng.normal(size=(4, 64))
-    per_coordinate = nn_entropy.estimate_coordinate_entropy(data, mie_order=1)
-    total = nn_entropy.estimate_entropy(data, mie_order=1)
+    per_coordinate = molentropy.estimate_coordinate_entropy(data, mie_order=1)
+    total = molentropy.estimate_entropy(data, mie_order=1)
     assert len(per_coordinate) == 4, per_coordinate
     assert abs(sum(per_coordinate) - total) < 1e-9, (sum(per_coordinate), total)
     print(f"order-1 additivity: {total!r}")
@@ -131,13 +131,13 @@ def check_mie_entropy_sums_to_second_order_total():
     the default-order total."""
     rng = np.random.default_rng(1)
     data = rng.normal(size=(4, 64))
-    per_coordinate = nn_entropy.estimate_coordinate_entropy(data)
-    total = nn_entropy.estimate_entropy(data)
-    assert abs(total - nn_entropy.estimate_entropy(data, mie_order=2)) < 1e-12
+    per_coordinate = molentropy.estimate_coordinate_entropy(data)
+    total = molentropy.estimate_entropy(data)
+    assert abs(total - molentropy.estimate_entropy(data, mie_order=2)) < 1e-12
     assert abs(sum(per_coordinate) - total) < 1e-9, (sum(per_coordinate), total)
     for order in (3, 4):
-        shares = nn_entropy.estimate_coordinate_entropy(data, mie_order=order)
-        order_total = nn_entropy.estimate_entropy(data, mie_order=order)
+        shares = molentropy.estimate_coordinate_entropy(data, mie_order=order)
+        order_total = molentropy.estimate_entropy(data, mie_order=order)
         assert abs(sum(shares) - order_total) < 1e-9, (order, sum(shares), order_total)
     print(f"order-2 additivity: {total!r}")
 
@@ -147,8 +147,8 @@ def check_translation_invariance():
     rng = np.random.default_rng(2)
     data = rng.normal(size=(3, 64))
     shifted = data + np.array([[10.0], [-4.0], [0.5]])
-    base = nn_entropy.estimate_entropy(data, mie_order=2)
-    moved = nn_entropy.estimate_entropy(shifted, mie_order=2)
+    base = molentropy.estimate_entropy(data, mie_order=2)
+    moved = molentropy.estimate_entropy(shifted, mie_order=2)
     assert abs(base - moved) < 1e-9, (base, moved)
     print(f"translation invariance: {base!r}")
 
@@ -158,8 +158,8 @@ def check_periodic_metric_accepted():
     samples that straddle the branch cut."""
     period = 2.0 * math.pi
     data = np.array([[0.05, period - 0.05, 3.0, 3.4, 1.2]])
-    linear = nn_entropy.estimate_entropy(data, mie_order=1)
-    periodic = nn_entropy.estimate_entropy(data, mie_order=1, periods=[period])
+    linear = molentropy.estimate_entropy(data, mie_order=1)
+    periodic = molentropy.estimate_entropy(data, mie_order=1, periods=[period])
     assert periodic < linear, (periodic, linear)
     print(f"periodic metric: linear {linear!r} -> periodic {periodic!r}")
 
@@ -167,7 +167,7 @@ def check_periodic_metric_accepted():
 def check_invalid_period_is_rejected():
     data = np.array([[0.0, 1.0, 2.0]])
     try:
-        nn_entropy.estimate_entropy(data, mie_order=1, periods=[-1.0])
+        molentropy.estimate_entropy(data, mie_order=1, periods=[-1.0])
     except ValueError:
         print("invalid period: rejected with ValueError")
     else:
@@ -183,8 +183,8 @@ def check_coordinate_options():
     fixtures = Path(__file__).resolve().parent / "fixtures"
     top, traj = str(fixtures / "test.parm7"), str(fixtures / "test.nc")
 
-    plain = nn_entropy.load_system(top, traj, phase_angles=False)
-    phase = nn_entropy.load_system(top, traj)  # phase angles are the default
+    plain = molentropy.load_system(top, traj, phase_angles=False)
+    phase = molentropy.load_system(top, traj)  # phase angles are the default
     assert plain.coordinates == phase.coordinates
     changed = set()
     for index, (period, a, b) in enumerate(zip(plain.periods, plain.data, phase.data)):
@@ -213,18 +213,18 @@ def check_coordinate_options():
     # the System's own periods are unchanged.
     linear = phase.estimate_entropy(periodic=False)
     assert linear != phase.estimate_entropy()
-    assert nn_entropy.estimate_entropy(phase, periodic=False) == linear
+    assert molentropy.estimate_entropy(phase, periodic=False) == linear
     assert any(p is not None for p in phase.periods)
     array = np.array(phase.data)
-    assert nn_entropy.estimate_entropy(array, periodic=False) == nn_entropy.estimate_entropy(array)
+    assert molentropy.estimate_entropy(array, periodic=False) == molentropy.estimate_entropy(array)
     try:
-        nn_entropy.estimate_entropy(array, periods=phase.periods, periodic=False)
+        molentropy.estimate_entropy(array, periods=phase.periods, periodic=False)
     except ValueError:
         pass
     else:
         raise AssertionError("periods and periodic=False together should raise ValueError")
 
-    tree = nn_entropy.load_system(top, traj, tree_bonds=True, phase_angles=True)
+    tree = molentropy.load_system(top, traj, tree_bonds=True, phase_angles=True)
     assert tree.coordinates > plain.coordinates, "tree bonds should add X-H bonds"
     assert math.isfinite(tree.mean_log_jacobian)
     print(
@@ -239,7 +239,7 @@ def check_quasi_harmonic():
     x = rng.normal(size=2000)
     y = 0.6 * x + rng.normal(size=2000)
     data = np.array([x, y])
-    got = nn_entropy.estimate_quasi_harmonic_entropy(data)
+    got = molentropy.estimate_quasi_harmonic_entropy(data)
     sigma = np.cov(data, bias=True)
     want = math.log(2 * math.pi * math.e) + 0.5 * math.log(np.linalg.det(sigma))
     assert abs(got["quasi_harmonic"] - want) < 1e-10, (got, want)
@@ -247,14 +247,14 @@ def check_quasi_harmonic():
     assert abs(got["correlation"] - 0.5 * math.log(1 - r * r)) < 1e-10, got
     assert got["boltzmann_quasi_harmonic"] == got["first_order_boltzmann"] + got["correlation"]
 
-    shares = nn_entropy.estimate_coordinate_quasi_harmonic_entropy(data)
+    shares = molentropy.estimate_coordinate_quasi_harmonic_entropy(data)
     assert set(shares) == set(got), shares.keys()
     for key, values in shares.items():
         assert len(values) == 2 and abs(sum(values) - got[key]) < 1e-9, (key, values, got[key])
     # Two coordinates split the correlation term evenly.
     assert abs(shares["correlation"][0] - shares["correlation"][1]) < 1e-12, shares
 
-    histogram = nn_entropy.estimate_quasi_harmonic_entropy(data, histogram_bins=50)
+    histogram = molentropy.estimate_quasi_harmonic_entropy(data, histogram_bins=50)
     assert histogram["quasi_harmonic"] == got["quasi_harmonic"]
     assert histogram["first_order_boltzmann"] != got["first_order_boltzmann"]
 
@@ -263,8 +263,8 @@ def check_quasi_harmonic():
     psi = np.angle(np.exp(1j * (phi + 2 * math.pi / 3 + 0.2 * rng.normal(size=5000))))
     rotor = np.array([phi, psi])
     periods = [2 * math.pi, 2 * math.pi]
-    complex_ = nn_entropy.estimate_quasi_harmonic_entropy(rotor, periods=periods)
-    centered = nn_entropy.estimate_quasi_harmonic_entropy(
+    complex_ = molentropy.estimate_quasi_harmonic_entropy(rotor, periods=periods)
+    centered = molentropy.estimate_quasi_harmonic_entropy(
         rotor, periods=periods, periodic_correlation="centered"
     )
     dz = [np.exp(1j * a) - np.exp(1j * a).mean() for a in (phi, psi)]
@@ -274,7 +274,7 @@ def check_quasi_harmonic():
     assert abs(complex_["correlation"] - 0.5 * math.log(1 - abs(rho) ** 2)) < 1e-10, complex_
     assert centered["correlation"] > complex_["correlation"] + 0.5, (centered, complex_)
     try:
-        nn_entropy.estimate_quasi_harmonic_entropy(rotor, periods=periods, periodic_correlation="polar")
+        molentropy.estimate_quasi_harmonic_entropy(rotor, periods=periods, periodic_correlation="polar")
     except ValueError:
         pass
     else:
@@ -282,7 +282,7 @@ def check_quasi_harmonic():
 
     # The fixture has 5 frames and 29 coordinates: too few for a correlation matrix.
     fixtures = Path(__file__).resolve().parent / "fixtures"
-    system = nn_entropy.load_system(str(fixtures / "test.parm7"), str(fixtures / "test.nc"))
+    system = molentropy.load_system(str(fixtures / "test.parm7"), str(fixtures / "test.nc"))
     for method in (system.estimate_quasi_harmonic_entropy, system.estimate_coordinate_quasi_harmonic_entropy):
         try:
             method()
@@ -305,34 +305,34 @@ def check_split():
     data = np.array([phi, x, narrow])
     periods = [2 * math.pi, None, 2 * math.pi]
 
-    basins = nn_entropy.detect_basins(phi)
+    basins = molentropy.detect_basins(phi)
     assert basins["count"] == 2 and basins["soft"], basins["count"]
     assert len(basins["labels"]) == n and abs(sum(basins["populations"]) - 1) < 1e-12
-    assert not nn_entropy.detect_basins(narrow)["soft"]
-    assert nn_entropy.detect_basins(rng.uniform(0, 2 * math.pi, size=n))["soft"]
+    assert not molentropy.detect_basins(narrow)["soft"]
+    assert molentropy.detect_basins(rng.uniform(0, 2 * math.pi, size=n))["soft"]
 
-    result = nn_entropy.estimate_split_entropy(data, periods=periods)
+    result = molentropy.estimate_split_entropy(data, periods=periods)
     assert result["soft_coordinates"] == [0] and result["hard_coordinates"] == [1, 2], result
     assert abs(result["total"] - (result["soft"] + result["hard"] + result["coupling"])) < 1e-12
     assert result["coupling"] <= 0 and result["states"] is None
     assert result["basin_counts"] == [2, None, 1], result["basin_counts"]
-    explicit = nn_entropy.estimate_split_entropy(
+    explicit = molentropy.estimate_split_entropy(
         data, periods=periods, soft_features="harmonics", harmonics=3
     )
     assert explicit["total"] == result["total"]
-    cos_sin = nn_entropy.estimate_split_entropy(data, periods=periods, soft_features="cossin")
-    one = nn_entropy.estimate_split_entropy(data, periods=periods, harmonics=1)
+    cos_sin = molentropy.estimate_split_entropy(data, periods=periods, soft_features="cossin")
+    one = molentropy.estimate_split_entropy(data, periods=periods, harmonics=1)
     assert cos_sin["coupling"] == one["coupling"]
-    shares = nn_entropy.estimate_split_entropy(data, periods=periods, per_coordinate=True)
+    shares = molentropy.estimate_split_entropy(data, periods=periods, per_coordinate=True)
     assert "coordinates" not in result and shares["total"] == result["total"]
     parts = shares["coordinates"]
     for key, term in (("total", result["total"]), ("coupling", result["coupling"])):
         assert abs(sum(parts[key]) - term) < 1e-9, (key, sum(parts[key]), term)
     assert abs(sum(parts["own"]) - result["soft"] - result["hard"]) < 1e-9
-    mist = nn_entropy.estimate_split_entropy(data, periods=periods, soft_estimator="mist")
+    mist = molentropy.estimate_split_entropy(data, periods=periods, soft_estimator="mist")
     assert mist["soft"] == result["soft"]  # one soft coordinate: MIST is its entropy
 
-    states = nn_entropy.estimate_split_entropy(
+    states = molentropy.estimate_split_entropy(
         data, periods=periods, soft=[0], coupling="states", state_labels=list(well)
     )
     assert len(states["states"]["states"]) == 2 and states["states"]["dropped_frames"] == 0
@@ -345,7 +345,7 @@ def check_split():
         dict(soft_estimator="tree"),
     ):
         try:
-            nn_entropy.estimate_split_entropy(data, periods=periods, **bad)
+            molentropy.estimate_split_entropy(data, periods=periods, **bad)
         except ValueError:
             pass
         else:
@@ -354,11 +354,11 @@ def check_split():
     many = rng.uniform(0, 2 * math.pi, size=(22, 2000))
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        nn_entropy.estimate_split_entropy(many, soft=list(range(21)), coupling="none")
+        molentropy.estimate_split_entropy(many, soft=list(range(21)), coupling="none")
     assert any("21 soft coordinates" in str(w.message) for w in caught), [str(w.message) for w in caught]
 
     fixtures = Path(__file__).resolve().parent / "fixtures"
-    system = nn_entropy.load_system(str(fixtures / "test.parm7"), str(fixtures / "test.nc"))
+    system = molentropy.load_system(str(fixtures / "test.parm7"), str(fixtures / "test.nc"))
     kinds = system.kinds
     assert system.soft_torsions and all(kinds[i] == "torsion" for i in system.soft_torsions)
     assert set(system.symmetric_rotor_torsions) <= set(system.soft_torsions)

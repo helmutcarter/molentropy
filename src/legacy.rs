@@ -11,7 +11,7 @@
 //!   Python's built-in `sum`, which is compensated from Python 3.12 on.
 //!
 //! Only the linear metric changes the result by more than rounding; see
-//! <https://helmutcarter.github.io/nn-entropy/legacy.html>.
+//! <https://helmutcarter.github.io/molentropy/legacy.html>.
 
 use crate::{CoordinateMetric, EntropyOptions, binomial, calc_joint_nn, combination_from_rank};
 use rayon::prelude::*;

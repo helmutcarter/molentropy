@@ -144,7 +144,7 @@ jobs:
         run: maturin build --out dist
 
       - name: Install wheel
-        run: python -m pip install --no-index --find-links dist nn_entropy
+        run: python -m pip install --no-index --find-links dist molentropy
 
       - name: Smoke test
         run: python tests/python_smoke.py

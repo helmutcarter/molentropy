@@ -2,7 +2,7 @@
 
 [Introduction](introduction.md)
 
-# Using nn-entropy
+# Using molentropy
 
 - [Installation](installation.md)
 - [Command line](cli.md)

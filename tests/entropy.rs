@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use nn_entropy::bat_library::{CoordinateOptions, InternalCoordinates};
-use nn_entropy::{
+use molentropy::bat_library::{CoordinateOptions, InternalCoordinates};
+use molentropy::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_entropy,
 };
 

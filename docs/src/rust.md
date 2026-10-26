@@ -1,10 +1,10 @@
 # Rust
 
-The crate is not on crates.io; depend on it through git:
+The crate is not on crates.io; depend on a release tag through git, so the estimates do not change under you:
 
 ```toml
 [dependencies]
-nn_entropy = { git = "https://github.com/helmutcarter/nn-entropy" }
+molentropy = { git = "https://github.com/helmutcarter/molentropy", tag = "v0.1.0" }
 ```
 
 Every public item has API documentation, with examples that are compiled and tested:
@@ -16,7 +16,7 @@ cargo doc --no-deps --open
 ## Overview
 
 ```rust
-use nn_entropy::{CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy};
+use molentropy::{CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy};
 
 // one_d_data is Vec<Vec<f64>> with shape [n_coords][n_frames]
 let entropy = calculate_entropy(&one_d_data, frames_end, 2, &EntropyOptions::default())?;
@@ -40,7 +40,7 @@ The NN MIE functions all take an `EntropyOptions`, described under [Nearest-neig
 To build coordinates from files, use `bat_library::InternalCoordinates`:
 
 ```rust
-use nn_entropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
+use molentropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
 
 let options = CoordinateOptions { bonds: BondSet::Tree, ..Default::default() }; // phase angles by default
 let mut internal = InternalCoordinates::with_options(&top, options)?; // ::new(&top) for the defaults
@@ -56,7 +56,7 @@ let log_jacobian = internal.log_jacobian()?;   // per frame; tree bonds only
 The quasi-harmonic estimators take the same data and options, plus their own settings:
 
 ```rust
-use nn_entropy::quasi_harmonic::{
+use molentropy::quasi_harmonic::{
     MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions, estimate_quasi_harmonic_entropy,
 };
 
@@ -71,7 +71,7 @@ The result also carries the terms the totals are built from: `first_order_gaussi
 The split estimator takes the soft set from the coordinates' topology:
 
 ```rust
-use nn_entropy::split::{SoftSelection, SplitOptions, estimate_split_entropy};
+use molentropy::split::{SoftSelection, SplitOptions, estimate_split_entropy};
 
 let soft = internal.soft_torsions(); // primary torsions about rotatable bonds
 let split = SplitOptions::new(SoftSelection::Indices(&soft)); // validated defaults

@@ -1,10 +1,10 @@
 [book]
-title = "nn-entropy"
+title = "molentropy"
 authors = ["Helmut Carter"]
 description = "Configurational entropy of molecules from molecular dynamics trajectories"
 language = "en"
 src = "src"
 
 [output.html]
-git-repository-url = "https://github.com/helmutcarter/nn-entropy"
-edit-url-template = "https://github.com/helmutcarter/nn-entropy/edit/main/docs/{path}"
+git-repository-url = "https://github.com/helmutcarter/molentropy"
+edit-url-template = "https://github.com/helmutcarter/molentropy/edit/main/docs/{path}"

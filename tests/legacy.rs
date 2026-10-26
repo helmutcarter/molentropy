@@ -9,11 +9,11 @@
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-use nn_entropy::bat_library::geometry::{
+use molentropy::bat_library::geometry::{
     bond_angle, legacy_bond_angle, legacy_torsion_angle, torsion_angle,
 };
-use nn_entropy::bat_library::{CoordinateOptions, Geometry, InternalCoordinates};
-use nn_entropy::legacy::legacy_entropy;
+use molentropy::bat_library::{CoordinateOptions, Geometry, InternalCoordinates};
+use molentropy::legacy::legacy_entropy;
 
 /// `python NN_entropy_calc.py test.parm7 -1 test.nc`, all five frames.
 const PYTHON_TOTAL_ALL_FRAMES: f64 = -44.640002919814606;
@@ -27,7 +27,7 @@ fn fixture(rel: &str) -> PathBuf {
 fn run_cli(args: &[&str]) -> Output {
     let top = fixture("tests/fixtures/test.parm7");
     let traj = fixture("tests/fixtures/test.nc");
-    Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+    Command::new(env!("CARGO_BIN_EXE_molentropy"))
         .args([top.to_str().unwrap(), traj.to_str().unwrap()])
         .args(args)
         .output()
