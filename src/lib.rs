@@ -294,6 +294,38 @@ fn validate_theiler_window(n_frames: usize, theiler_window: usize) -> Result<(),
     Ok(())
 }
 
+/// Folds `0..count` in parallel chunks whose bounds depend on `count` alone,
+/// returning one result per chunk in order. Rayon's `fold`/`reduce` group the
+/// work by how threads steal it, so floating-point sums built that way can
+/// differ in the last bits between runs; summing these chunk results in order
+/// gives the same answer on every run and any number of threads.
+fn fold_ordered_chunks<T, F>(count: usize, fold_chunk: F) -> Result<Vec<T>, String>
+where
+    T: Send,
+    F: Fn(std::ops::Range<usize>) -> Result<T, String> + Sync,
+{
+    // At most about 1024 chunks, so per-chunk state stays small, and at least
+    // 64 items each, so the scheduling overhead stays negligible.
+    let chunk = count.div_ceil(1024).max(64);
+    (0..count.div_ceil(chunk))
+        .into_par_iter()
+        .map(|c| fold_chunk(c * chunk..((c + 1) * chunk).min(count)))
+        .collect()
+}
+
+/// Sums `term` over `0..count` in parallel, in an order fixed by `count`.
+fn ordered_sum<F>(count: usize, term: F) -> Result<f64, String>
+where
+    F: Fn(usize) -> Result<f64, String> + Sync,
+{
+    let partial = fold_ordered_chunks(count, |range| {
+        range
+            .map(&term)
+            .try_fold(0.0, |acc, value| value.map(|v| acc + v))
+    })?;
+    Ok(partial.iter().sum())
+}
+
 fn binomial(n: usize, k: usize) -> usize {
     if k > n {
         return 0;
@@ -384,16 +416,9 @@ pub fn calculate_entropy(
     let three_d_constant = entropy_constant_with_convention(n_frames, 3, constant, theiler_window)?;
     let four_d_constant = entropy_constant_with_convention(n_frames, 4, constant, theiler_window)?;
 
-    let one_d_distances_total: f64 = one_d_data
-        .par_iter()
-        .zip(metrics.par_iter())
-        .try_fold(
-            || 0.0,
-            |acc, (ic, metric)| {
-                Ok::<f64, String>(acc + calc_joint_nn_with_window([ic], [*metric], theiler_window)?)
-            },
-        )
-        .try_reduce(|| 0.0, |a, b| Ok::<f64, String>(a + b))?;
+    let one_d_distances_total = ordered_sum(degrees_freedom, |i| {
+        calc_joint_nn_with_window([&one_d_data[i]], [metrics[i]], theiler_window)
+    })?;
 
     let one_d_entropy = estimate_entropy_efficient(
         one_d_distances_total,
@@ -408,22 +433,14 @@ pub fn calculate_entropy(
 
     let two_d_degrees_freedom = binomial(degrees_freedom, 2);
 
-    let two_d_distances_total: f64 = (0..two_d_degrees_freedom)
-        .into_par_iter()
-        .try_fold(
-            || 0.0,
-            |acc, rank| {
-                let [i, j] = combination_from_rank::<2>(rank, degrees_freedom);
-                Ok::<f64, String>(
-                    acc + calc_joint_nn_with_window(
-                        [&one_d_data[i], &one_d_data[j]],
-                        [metrics[i], metrics[j]],
-                        theiler_window,
-                    )?,
-                )
-            },
+    let two_d_distances_total = ordered_sum(two_d_degrees_freedom, |rank| {
+        let [i, j] = combination_from_rank::<2>(rank, degrees_freedom);
+        calc_joint_nn_with_window(
+            [&one_d_data[i], &one_d_data[j]],
+            [metrics[i], metrics[j]],
+            theiler_window,
         )
-        .try_reduce(|| 0.0, |a, b| Ok::<f64, String>(a + b))?;
+    })?;
 
     let two_d_entropy = estimate_entropy_efficient(
         two_d_distances_total * 2.0,
@@ -437,22 +454,14 @@ pub fn calculate_entropy(
 
     let three_d_degrees_freedom = binomial(degrees_freedom, 3);
 
-    let three_d_distances_total: f64 = (0..three_d_degrees_freedom)
-        .into_par_iter()
-        .try_fold(
-            || 0.0,
-            |acc, rank| {
-                let [i, j, k] = combination_from_rank::<3>(rank, degrees_freedom);
-                Ok::<f64, String>(
-                    acc + calc_joint_nn_with_window(
-                        [&one_d_data[i], &one_d_data[j], &one_d_data[k]],
-                        [metrics[i], metrics[j], metrics[k]],
-                        theiler_window,
-                    )?,
-                )
-            },
+    let three_d_distances_total = ordered_sum(three_d_degrees_freedom, |rank| {
+        let [i, j, k] = combination_from_rank::<3>(rank, degrees_freedom);
+        calc_joint_nn_with_window(
+            [&one_d_data[i], &one_d_data[j], &one_d_data[k]],
+            [metrics[i], metrics[j], metrics[k]],
+            theiler_window,
         )
-        .try_reduce(|| 0.0, |a, b| Ok::<f64, String>(a + b))?;
+    })?;
 
     let three_d_entropy = estimate_entropy_efficient(
         three_d_distances_total * 3.0,
@@ -471,27 +480,19 @@ pub fn calculate_entropy(
 
     let four_d_degrees_freedom = binomial(degrees_freedom, 4);
 
-    let four_d_distances_total: f64 = (0..four_d_degrees_freedom)
-        .into_par_iter()
-        .try_fold(
-            || 0.0,
-            |acc, rank| {
-                let [i, j, k, l] = combination_from_rank::<4>(rank, degrees_freedom);
-                Ok::<f64, String>(
-                    acc + calc_joint_nn_with_window(
-                        [
-                            &one_d_data[i],
-                            &one_d_data[j],
-                            &one_d_data[k],
-                            &one_d_data[l],
-                        ],
-                        [metrics[i], metrics[j], metrics[k], metrics[l]],
-                        theiler_window,
-                    )?,
-                )
-            },
+    let four_d_distances_total = ordered_sum(four_d_degrees_freedom, |rank| {
+        let [i, j, k, l] = combination_from_rank::<4>(rank, degrees_freedom);
+        calc_joint_nn_with_window(
+            [
+                &one_d_data[i],
+                &one_d_data[j],
+                &one_d_data[k],
+                &one_d_data[l],
+            ],
+            [metrics[i], metrics[j], metrics[k], metrics[l]],
+            theiler_window,
         )
-        .try_reduce(|| 0.0, |a, b| Ok::<f64, String>(a + b))?;
+    })?;
 
     let four_d_entropy = estimate_entropy_efficient(
         four_d_distances_total * 4.0,
@@ -631,33 +632,35 @@ fn subset_entropy_sums<const K: usize>(
 ) -> Result<(f64, Vec<f64>), String> {
     let dimensions = one_d_data.len();
     let reciprocal_n_frames = (one_d_data[0].len() as f64).recip();
-    (0..binomial(dimensions, K))
-        .into_par_iter()
-        .try_fold(
-            || (0.0, vec![0.0; dimensions]),
-            |(mut total, mut per_coordinate), rank| {
-                let subset = combination_from_rank::<K>(rank, dimensions);
-                let distance = calc_joint_nn_with_window(
-                    subset.map(|i| one_d_data[i].as_slice()),
-                    subset.map(|i| metrics[i]),
-                    theiler_window,
-                )?;
-                let entropy =
-                    estimate_entropy_efficient(distance * K as f64, reciprocal_n_frames, constant);
-                total += entropy;
-                for i in subset {
-                    per_coordinate[i] += entropy;
-                }
-                Ok::<_, String>((total, per_coordinate))
-            },
-        )
-        .try_reduce(
-            || (0.0, vec![0.0; dimensions]),
-            |(left_total, mut left), (right_total, right)| {
-                left.iter_mut().zip(right).for_each(|(a, b)| *a += b);
-                Ok((left_total + right_total, left))
-            },
-        )
+    let chunks = fold_ordered_chunks(binomial(dimensions, K), |ranks| {
+        let mut total = 0.0;
+        let mut per_coordinate = vec![0.0; dimensions];
+        for rank in ranks {
+            let subset = combination_from_rank::<K>(rank, dimensions);
+            let distance = calc_joint_nn_with_window(
+                subset.map(|i| one_d_data[i].as_slice()),
+                subset.map(|i| metrics[i]),
+                theiler_window,
+            )?;
+            let entropy =
+                estimate_entropy_efficient(distance * K as f64, reciprocal_n_frames, constant);
+            total += entropy;
+            for i in subset {
+                per_coordinate[i] += entropy;
+            }
+        }
+        Ok((total, per_coordinate))
+    })?;
+    let mut total = 0.0;
+    let mut per_coordinate = vec![0.0; dimensions];
+    for (chunk_total, chunk_shares) in chunks {
+        total += chunk_total;
+        per_coordinate
+            .iter_mut()
+            .zip(chunk_shares)
+            .for_each(|(a, b)| *a += b);
+    }
+    Ok((total, per_coordinate))
 }
 
 fn coordinate_entropy_impl(

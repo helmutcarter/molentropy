@@ -23,6 +23,7 @@ First release, under the name molentropy (previously nn-entropy).
   - legacy mode, which reproduces the original Python implementation.
 - Per-coordinate entropies for every estimator except the joint estimate.
 - Theiler windows for time-correlated frames, and exact finite-sample constants.
+- Results are bit-for-bit reproducible across runs and thread counts.
 - A command-line program, a Rust library and Python bindings.
 - Validation against HREX/MBAR reference entropies of small molecules and
   peptides at 300 K.
