@@ -17,8 +17,8 @@ use nn_entropy::quasi_harmonic::{
     MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions, estimate_quasi_harmonic_entropy,
 };
 use nn_entropy::split::{
-    Coupling, HardEstimator, SoftEstimator, SoftSelection, SplitOptions, StateDefinition,
-    StateOptions, estimate_split_entropy,
+    Coupling, HardEstimator, SoftEstimator, SoftFeatures, SoftSelection, SplitOptions,
+    StateDefinition, StateOptions, estimate_split_entropy,
 };
 use nn_entropy::{CoordinateMetric, EntropyOptions, calculate_entropy};
 
@@ -104,7 +104,7 @@ fn estimates(state: &State) -> Result<Vec<f64>, String> {
     ])
 }
 
-/// The split estimator's default and two variants, with the topological soft
+/// The split estimator's default and three variants, with the topological soft
 /// set. Split needs phase angles, so these run only with them.
 fn split_estimates(state: &State) -> Result<Vec<f64>, String> {
     let frames = state.data[0].len();
@@ -113,6 +113,10 @@ fn split_estimates(state: &State) -> Result<Vec<f64>, String> {
         ..Default::default()
     };
     let default = SplitOptions::new(SoftSelection::Indices(&state.soft));
+    let mut cos_sin = default;
+    cos_sin.coupling = Coupling::Gaussian {
+        features: SoftFeatures::CosSin,
+    };
     let mut per_state = default;
     per_state.coupling = Coupling::PerState(StateOptions {
         definition: StateDefinition::Detected {
@@ -125,14 +129,15 @@ fn split_estimates(state: &State) -> Result<Vec<f64>, String> {
     joint_bqh.soft_estimator = SoftEstimator::JointNearestNeighbor;
     joint_bqh.hard_estimator = HardEstimator::BoltzmannQuasiHarmonic;
     joint_bqh.coupling = Coupling::None;
-    [default, per_state, joint_bqh]
+    [default, cos_sin, per_state, joint_bqh]
         .iter()
         .map(|split| estimate_split_entropy(&state.data, frames, split, &options).map(|r| r.total))
         .collect()
 }
 
-const SPLIT_ESTIMATORS: [&str; 3] = [
+const SPLIT_ESTIMATORS: [&str; 4] = [
     "split",
+    "split, cos/sin coupling",
     "split, per-state coupling",
     "split, joint soft, BQH hard",
 ];

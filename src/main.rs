@@ -115,7 +115,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         fail(format!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|joint] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin] [--state-torsions auto|LIST] [--min-state-frames N]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|joint] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]",
             args[0]
         ));
     }
@@ -143,6 +143,7 @@ fn main() {
     let mut hard_estimator: Option<HardEstimator> = None;
     let mut coupling: Option<CouplingFlag> = None;
     let mut soft_features: Option<SoftFeatures> = None;
+    let mut harmonics: Option<usize> = None;
     let mut state_torsions: Option<CoordinateChoice> = None;
     let mut min_state_frames: Option<usize> = None;
     let mut mie_order = 2;
@@ -242,6 +243,7 @@ fn main() {
                     i,
                     &[
                         ("mie", SoftEstimator::NearestNeighborMie { order: 2 }),
+                        ("mist", SoftEstimator::MutualInformationSpanningTree),
                         ("joint", SoftEstimator::JointNearestNeighbor),
                     ],
                 ));
@@ -277,8 +279,13 @@ fn main() {
                     &[
                         ("complex", SoftFeatures::Complex),
                         ("cossin", SoftFeatures::CosSin),
+                        ("harmonics", SoftFeatures::default()),
                     ],
                 ));
+                i += 2;
+            }
+            "--harmonics" => {
+                harmonics = Some(flag_value(&args, i));
                 i += 2;
             }
             "--state-torsions" => {
@@ -334,14 +341,16 @@ fn main() {
         (hard_estimator.is_some(), "--hard-estimator"),
         (coupling.is_some(), "--coupling"),
         (soft_features.is_some(), "--soft-features"),
+        (harmonics.is_some(), "--harmonics"),
         (state_torsions.is_some(), "--state-torsions"),
         (min_state_frames.is_some(), "--min-state-frames"),
     ];
     if !split && let Some((_, flag)) = split_flags.iter().find(|(given, _)| *given) {
         fail(format!("{flag} applies only to --estimator split"));
     }
-    let joint_soft = soft_estimator == Some(SoftEstimator::JointNearestNeighbor);
-    if mie_order != 2 && !(estimator == Estimator::NearestNeighbor || (split && !joint_soft)) {
+    let mie_soft =
+        soft_estimator.is_none_or(|e| matches!(e, SoftEstimator::NearestNeighborMie { .. }));
+    if mie_order != 2 && !(estimator == Estimator::NearestNeighbor || (split && mie_soft)) {
         fail("--mie-order applies only to --estimator nn, or to split with --soft-estimator mie");
     }
     let bqh_hard = hard_estimator == Some(HardEstimator::BoltzmannQuasiHarmonic);
@@ -356,8 +365,16 @@ fn main() {
         fail("--periodic-correlation applies only to --estimator qh, bqh or split");
     }
     let coupling_flag = coupling.unwrap_or(CouplingFlag::Gaussian);
-    if soft_features.is_some() && coupling_flag != CouplingFlag::Gaussian {
-        fail("--soft-features applies only to --coupling gaussian");
+    if (soft_features.is_some() || harmonics.is_some()) && coupling_flag != CouplingFlag::Gaussian {
+        fail("--soft-features and --harmonics apply only to --coupling gaussian");
+    }
+    if harmonics.is_some()
+        && soft_features.is_some_and(|f| !matches!(f, SoftFeatures::Harmonics(_)))
+    {
+        fail("--harmonics applies only to --soft-features harmonics");
+    }
+    if harmonics == Some(0) {
+        fail("--harmonics must be at least 1");
     }
     if (state_torsions.is_some() || min_state_frames.is_some())
         && coupling_flag != CouplingFlag::States
@@ -520,7 +537,12 @@ fn main() {
             }
             settings.coupling = match coupling_flag {
                 CouplingFlag::Gaussian => Coupling::Gaussian {
-                    features: soft_features.unwrap_or_default(),
+                    features: match (soft_features, harmonics) {
+                        (Some(SoftFeatures::Harmonics(_)) | None, Some(count)) => {
+                            SoftFeatures::Harmonics(count)
+                        }
+                        (features, _) => features.unwrap_or_default(),
+                    },
                 },
                 CouplingFlag::None => Coupling::None,
                 CouplingFlag::States => Coupling::PerState(StateOptions {

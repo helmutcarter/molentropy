@@ -20,6 +20,7 @@ use common::{
 };
 use nn_entropy::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_mutual_information,
+    estimate_mist_entropy,
 };
 
 const REPLICATES: usize = 5;
@@ -278,6 +279,61 @@ fn mutual_information_vanishes_for_independent_coordinates() {
             "pair {pair}: mean MI over {INDEPENDENT_REPLICATES} replicates was {mean}, expected ~0"
         );
     }
+}
+
+#[test]
+fn mist_is_exact_for_a_markov_chain_that_mie2_overcounts() {
+    // x1 -> x2 -> x3 with correlation rho at each link: the joint density
+    // factorizes along the chain, so the spanning tree (1-2, 2-3) gives the
+    // exact entropy. MIE-2 also subtracts I(x1; x3), which is not zero, and
+    // undershoots by that much.
+    let rho: f64 = 0.8;
+    let n = 20_000;
+    let exact = 3.0 * normal_entropy(1.0) + (1.0 - rho * rho).ln();
+    let undercount = bivariate_normal_mutual_information(rho * rho);
+    let sample = |seed: u64| {
+        let mut rng = Rng::new(seed);
+        let x1 = rng.normal_vec(n, 0.0, 1.0);
+        let scale = (1.0 - rho * rho).sqrt();
+        let x2: Vec<f64> = x1.iter().map(|x| rho * x + scale * rng.normal()).collect();
+        let x3: Vec<f64> = x2.iter().map(|x| rho * x + scale * rng.normal()).collect();
+        vec![x1, x2, x3]
+    };
+    let metrics = linear(3);
+    let options = EntropyOptions {
+        metrics: Some(&metrics),
+        ..Default::default()
+    };
+    let (mist, mist_spread) =
+        replicate_mean(|seed| estimate_mist_entropy(&sample(seed), n, &options).unwrap());
+    check("MIST", mist, exact, mist_spread, 0.03);
+    let (mie, mie_spread) = replicate_mean(|seed| entropy_of(sample(seed), 2));
+    check("MIE-2", mie, exact - undercount, mie_spread, 0.03);
+}
+
+#[test]
+fn mist_of_one_or_two_coordinates_is_the_mie() {
+    let mut rng = Rng::new(17);
+    let (x, y) = rng.correlated_normal_pair(5_000, 0.6);
+    let metrics = linear(2);
+    let options = EntropyOptions {
+        metrics: Some(&metrics),
+        ..Default::default()
+    };
+    let one = vec![x.clone()];
+    let one_metric = linear(1);
+    let one_options = EntropyOptions {
+        metrics: Some(&one_metric),
+        ..Default::default()
+    };
+    assert_eq!(
+        estimate_mist_entropy(&one, 5_000, &one_options).unwrap(),
+        calculate_entropy(&one, 5_000, 1, &one_options).unwrap()
+    );
+    let two = vec![x, y];
+    let mist = estimate_mist_entropy(&two, 5_000, &options).unwrap();
+    let mie = calculate_entropy(&two, 5_000, 2, &options).unwrap();
+    assert!((mist - mie).abs() < 1e-12, "{mist} vs {mie}");
 }
 
 // ---------------------------------------------------------------------------

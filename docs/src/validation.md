@@ -71,11 +71,12 @@ The [split estimator](split.md) with the topological soft set, on the same traje
 
 | estimator | rep 1 | rep 2 | rep 3 | mean error | RMSE |
 |---|---|---|---|---|---|
-| **split** (MIE-2 soft, QH hard, Gaussian coupling) | 14.216 | 14.499 | 14.408 | +0.050 | 0.063 |
+| split (MIE-2 soft, QH hard, Gaussian coupling with three harmonics) | 14.296 | 14.565 | 14.482 | +0.123 | 0.128 |
+| split, cos/sin coupling | 14.216 | 14.499 | 14.408 | +0.050 | 0.063 |
 | split, per-state coupling | 14.246 | 14.529 | 14.440 | +0.081 | 0.089 |
 | split, joint soft, BQH hard, no coupling | 14.220 | 14.557 | 14.368 | +0.057 | 0.078 |
 
-On butane the coupling between soft and hard coordinates is small (Gaussian and no coupling differ by 0.001 nats, as do cos/sin and `e^{iφ}` soft features), detection chooses the same soft set as topology, and the finite-sample constant cancels in the difference. Centered hard phase angles beat complex ones by about 0.02 nats, and per-state coupling is about 0.03 nats worse than Gaussian coupling, from the bias of a Gaussian fitted within each state. The split estimator improves on an earlier hand-tuned version of the same decomposition (soft torsions by a joint estimate or MIE-2, hard Gaussian within hand-binned states: +0.06 and +0.14 nats), but plain BQH is better on butane, whose single multi-basin torsion BQH's nearest-neighbor marginals already describe.
+On butane the coupling between soft and hard coordinates is small (with cos/sin or `e^{iφ}` soft features, Gaussian and no coupling differ by 0.001 nats), detection chooses the same soft set as topology, and the finite-sample constant cancels in the difference. Centered hard phase angles beat complex ones by about 0.02 nats, and per-state coupling is about 0.03 nats worse than Gaussian coupling, from the bias of a Gaussian fitted within each state. The split estimator improves on an earlier hand-tuned version of the same decomposition (soft torsions by a joint estimate or MIE-2, hard Gaussian within hand-binned states: +0.06 and +0.14 nats), but plain BQH is better on butane, whose single multi-basin torsion BQH's nearest-neighbor marginals already describe. The default's three harmonics, chosen on the molecules below, add about 0.07 nats here, as they do at 300 K.
 
 ### What it shows
 
@@ -111,11 +112,11 @@ after it is that replicate's reference `S0 - S1`.
 
 ## Small molecules and peptides at 300 K
 
-Butane has one multi-basin torsion. To set the split estimator's defaults and find where it fails, the same comparison was repeated on 18 small molecules and two peptides in two environments, all at 300 K.
+Butane has one multi-basin torsion. To set the split estimator's defaults and find where it fails, the same comparison was repeated on 18 small molecules and two peptides in two environments, all at 300 K. The defaults were then checked on 8 more small molecules that played no part in choosing them.
 
 ### Systems and end states
 
-- **Small molecules**, GAFF2 with AM1-BCC charges, gas phase: alkanes (butane, hexane, decane, hexadecane), molecules from the FreeSolv set, and others chosen as edge cases: a linear group (1-butyne), an intramolecular hydrogen bond (ethylene glycol), a flat double well (biphenyl), a puckering ring (cyclohexane) and a gas-phase zwitterion (GABA).
+- **Small molecules**, GAFF2 with AM1-BCC charges, gas phase: alkanes (butane, hexane, decane, hexadecane), molecules from the FreeSolv set, and others chosen as edge cases: a linear group (1-butyne), an intramolecular hydrogen bond (ethylene glycol), a flat double well (biphenyl), a puckering ring (cyclohexane) and a gas-phase zwitterion (GABA). Held out (‡): 3-amino-1-propanol, 1,2-dimethoxyethane, 2,3-dimethylbutane, ethyl acetate, N-ethylacetamide, 1-pentanol, butylbenzene and alanine dipeptide (Ace-Ala-Nme, with GAFF2 like the others).
 - **Peptides**, ff14SB: chignolin (CLN025), a folded β-hairpin, and Ace-(GS)<sub>5</sub>-Nme, a disordered chain, each in vacuum and in GBn2 implicit solvent (mbondi3 radii).
 - **State 1** is the molecule with its full force field. **State 0** keeps bonds and angles but has every dihedral term, charge and Lennard-Jones parameter switched off, and in GBn2 the solvation term too. For the molecules marked † state 0 keeps impropers and the torsions about ring bonds, so rings stay planar and only rotatable bonds become free; for the two marked "ring torsions off" the ring is floppy in state 0.
 
@@ -133,42 +134,78 @@ References are therefore good to about ±0.1 nats for the small molecules; diffe
 
 ### Estimates
 
-Each estimate uses the end-state frames (one per ps) of the same replicate, phase angles and the change in ⟨ln J⟩, as for butane. RMSE in nats over the three replicates against each replicate's own reference; "soft" is the number of topological soft torsions. "Split" is the default (MIE-2 soft, centered QH hard, Gaussian coupling with cos/sin features); the last two columns change only the coupling. "Fails" means no state had enough frames.
+Each estimate uses the end-state frames (one per ps) of the same replicate, phase angles and the change in ⟨ln J⟩, as for butane. RMSE in nats over the three replicates against each replicate's own reference; "soft" is the number of topological soft torsions. "Split" is the default (MIE-2 soft, centered QH hard, Gaussian coupling with three harmonics of each soft torsion); "cos/sin" uses only the first harmonic in the coupling (the default before the held-out check), "MIST" replaces MIE-2 for the soft set, and "per-state" replaces the coupling. The best estimate in each row is in bold. "Fails" means no state had enough frames.
 
-| system | soft | reference | QH | BQH | split | split mean error | split, e^{iφ} | split, per-state |
-|---|---|---|---|---|---|---|---|---|
-| butane | 3 | 14.51 ± 0.03 | 1.03 | 0.11 | **0.04** | +0.01 | 0.04 | 0.06 |
-| hexane | 5 | 22.01 ± 0.12 | 1.67 | 0.07 | **0.04** | +0.00 | 0.04 | 0.50 |
-| decane | 9 | 12.17 ± 0.11 | 7.43 | 1.95 | **1.30** | -1.12 | 1.60 | fails |
-| hexadecane | 15 | 21.22 ± 0.12 | 13.13 | 4.34 | **1.22** | -1.17 | 1.86 | fails |
-| 1-butyne | 3 | 0.98 ± 0.02 | 0.69 | 0.11 | **0.07** | -0.05 | 0.07 | 0.07 |
-| dichloropropane | 2 | 2.58 ± 0.03 | 1.79 | 0.54 | **0.22** | -0.22 | 0.25 | 0.15 |
-| ethylene glycol | 3 | 2.96 ± 0.01 | 2.29 | 1.42 | **0.56** | -0.56 | 0.61 | 0.48 |
-| isoflurane | 3 | 4.33 ± 0.08 | 3.21 | 1.50 | **0.29** | -0.29 | 0.45 | 0.27 |
-| butylamine | 4 | 4.19 ± 0.05 | 2.77 | 0.55 | **0.30** | -0.30 | 0.37 | 0.18 |
-| trimethyl phosphate | 6 | 3.77 ± 0.07 | 2.68 | 0.72 | **0.38** | -0.33 | 0.45 | 0.41 |
-| methylpentanol | 6 | 7.48 ± 0.07 | 4.40 | 1.17 | **0.60** | -0.58 | 0.73 | 0.49 |
-| trimethoxyethane | 7 | 9.61 ± 0.03 | 8.13 | 3.27 | **0.20** | -0.00 | 0.34 | 0.22 |
-| trifluoroethylaniline | 4 | 3.31 ± 0.09 | 1.82 | 1.14 | **0.61** | -0.60 | 0.68 | 0.49 |
-| biphenyl † | 1 | 1.40 ± 0.06 | 0.70 | 0.30 | **0.31** | -0.31 | 0.31 | 0.02 |
-| N,N-dimethyl-4-nitrobenzamide † | 5 | 6.90 ± 0.11 | 5.80 | 3.50 | **1.63** | -1.62 | 2.38 | 0.34 |
-| N,N-dimethyl-4-nitrobenzamide, ring torsions off | 5 | 20.11 ± 0.11 | 0.24 | 2.28 | **2.96** | +2.96 | 2.22 | 4.28 |
-| cyclohexane, ring torsions off | 0 | 4.53 ± 0.10 | 0.72 | 6.77 | **0.61** | +0.61 | 0.61 | 0.61 |
-| GABA zwitterion | 4 | 9.58 ± 0.06 | 6.58 | 2.73 | **1.81** | -1.81 | 2.37 | 3.67 |
-| Ace-(GS)5-Nme, GBn2 | 43 | 104.02 ± 0.04 | 31.09 | 22.35 | **9.38** | -8.28 | 10.10 | fails |
-| Ace-(GS)5-Nme, vacuum | 43 | 136.86 ± 0.37 | 50.05 | 40.55 | **53.37** | +53.04 | 51.66 | 63.66 |
-| chignolin CLN025, GBn2 | 50 | 194.59 ± 3.00 | 21.45 | 5.30 | **26.98** | +26.02 | 24.97 | fails |
-| chignolin CLN025, vacuum | 50 | 231.73 ± 3.31 | 53.44 | 35.00 | **158.41** | +157.59 | 154.90 | 193.72 |
+| system | soft | reference | QH | BQH | split | split mean error | split, cos/sin | split, MIST | split, per-state |
+|---|---|---|---|---|---|---|---|---|---|
+| butane | 3 | 14.51 ± 0.03 | 1.03 | 0.11 | 0.09 | +0.08 | **0.04** | 0.09 | 0.06 |
+| hexane | 5 | 22.01 ± 0.12 | 1.67 | 0.07 | 0.13 | +0.12 | **0.04** | 0.12 | 0.50 |
+| decane | 9 | 12.17 ± 0.11 | 7.43 | 1.95 | 0.73 | -0.34 | 1.30 | **0.66** | fails |
+| hexadecane | 15 | 21.22 ± 0.12 | 13.13 | 4.34 | **0.40** | +0.18 | 1.22 | 1.52 | fails |
+| 1-butyne | 3 | 0.98 ± 0.02 | 0.69 | 0.11 | 0.05 | +0.01 | 0.07 | **0.04** | 0.07 |
+| dichloropropane | 2 | 2.58 ± 0.03 | 1.79 | 0.54 | **0.06** | -0.06 | 0.22 | 0.06 | 0.15 |
+| ethylene glycol | 3 | 2.96 ± 0.01 | 2.29 | 1.42 | **0.43** | -0.43 | 0.56 | 0.66 | 0.48 |
+| isoflurane | 3 | 4.33 ± 0.08 | 3.21 | 1.50 | **0.14** | -0.13 | 0.29 | 0.21 | 0.27 |
+| butylamine | 4 | 4.19 ± 0.05 | 2.77 | 0.55 | **0.06** | -0.05 | 0.30 | 0.08 | 0.18 |
+| trimethyl phosphate | 6 | 3.77 ± 0.07 | 2.68 | 0.72 | **0.22** | -0.12 | 0.38 | 0.29 | 0.41 |
+| methylpentanol | 6 | 7.48 ± 0.07 | 4.40 | 1.17 | **0.20** | -0.12 | 0.60 | 0.37 | 0.49 |
+| trimethoxyethane | 7 | 9.61 ± 0.03 | 8.13 | 3.27 | 0.33 | +0.26 | **0.20** | 1.22 | 0.22 |
+| trifluoroethylaniline | 4 | 3.31 ± 0.09 | 1.82 | 1.14 | **0.23** | -0.21 | 0.61 | 0.34 | 0.49 |
+| biphenyl † | 1 | 1.40 ± 0.06 | 0.70 | 0.30 | 0.17 | -0.17 | 0.31 | 0.17 | **0.02** |
+| N,N-dimethyl-4-nitrobenzamide † | 5 | 6.90 ± 0.11 | 5.80 | 3.50 | 0.84 | -0.84 | 1.63 | 1.03 | **0.34** |
+| N,N-dimethyl-4-nitrobenzamide, ring torsions off | 5 | 20.11 ± 0.11 | **0.24** | 2.28 | 3.75 | +3.74 | 2.96 | 3.50 | 4.28 |
+| cyclohexane, ring torsions off | 0 | 4.53 ± 0.10 | 0.72 | 6.77 | 0.61 | +0.61 | 0.61 | 0.61 | **0.61** |
+| GABA zwitterion | 4 | 9.58 ± 0.06 | 6.58 | 2.73 | **1.00** | -0.99 | 1.81 | 1.78 | 3.67 |
+| 3-amino-1-propanol ‡ | 4 | 6.98 ± 0.04 | 4.74 | 2.36 | **0.46** | -0.44 | 0.79 | 1.22 | 0.83 |
+| 1,2-dimethoxyethane ‡ | 5 | 4.94 ± 0.04 | 3.78 | 1.21 | **0.41** | -0.41 | 0.66 | 0.59 | 0.52 |
+| 2,3-dimethylbutane ‡ | 5 | 6.75 ± 0.06 | 4.78 | 1.22 | **0.43** | -0.40 | 0.92 | 0.47 | 0.86 |
+| ethyl acetate ‡ | 4 | 5.16 ± 0.04 | 1.40 | 1.00 | 0.17 | +0.16 | 0.25 | **0.10** | 0.73 |
+| N-ethylacetamide ‡ | 4 | 5.96 ± 0.11 | 2.70 | 0.65 | 0.34 | +0.32 | 0.30 | **0.25** | 0.56 |
+| 1-pentanol ‡ | 5 | 5.11 ± 0.06 | 3.01 | 0.85 | 0.22 | -0.15 | 0.49 | 0.21 | **0.11** |
+| butylbenzene † ‡ | 4 | 4.66 ± 0.04 | 2.98 | 1.07 | **0.22** | -0.22 | 0.57 | 0.28 | 0.28 |
+| alanine dipeptide (Ace-Ala-Nme) ‡ | 7 | 14.28 ± 0.02 | 5.19 | 2.06 | 0.75 | +0.60 | 0.55 | **0.08** | 0.94 |
+| Ace-(GS)5-Nme, GBn2 | 43 | 104.02 ± 0.04 | 31.09 | 22.35 | **7.04** | -5.55 | 9.38 | 14.16 | fails |
+| Ace-(GS)5-Nme, vacuum | 43 | 136.86 ± 0.37 | 50.05 | 40.55 | 57.28 | +56.95 | 53.37 | **28.93** | 63.66 |
+| chignolin CLN025, GBn2 | 50 | 194.59 ± 3.00 | 21.45 | 5.30 | 30.34 | +29.46 | 26.98 | **3.61** | fails |
+| chignolin CLN025, vacuum | 50 | 231.73 ± 3.31 | 53.44 | 35.00 | 164.76 | +163.98 | 158.41 | **28.13** | 193.72 |
 
 QH and BQH are `estimate_quasi_harmonic_entropy` with complex torsions.
 
 ### What it shows
 
-- **On small flexible molecules the split estimator is the best general choice.** With up to 15 soft torsions it was within 0.6 nats on 11 of 15 molecules and 1.6 at worst, and better than BQH on all but biphenyl, where they tie. QH misses multi-basin torsions by up to 13 nats.
-- **cos/sin features beat `e^{iφ}`** on 17 of 18 small molecules or tied, by up to 0.8 nats; the exception is the benzamide with free ring torsions. With `e^{iφ}`, S0 − S1 came out too low on almost every molecule, as expected if it misses part of the coupling in state 1, where most of it is.
+- **On small flexible molecules the split estimator is the best general choice.** On the 23 small molecules with only rotatable bonds free in state 0 (all but the two "ring torsions off" rows and GABA), the default was within 0.5 nats on 20, with an RMSE of 0.38 and 0.84 at worst. It beat BQH on all but hexane. QH misses multi-basin torsions by up to 13 nats.
+- **Three harmonics in the coupling held up on new molecules.** On the 15 molecules used to choose it, three harmonics instead of cos/sin cut the RMSE from 0.70 to 0.36 nats. On the 8 held-out ones it cut it from 0.61 to 0.41, improving 6 of the 8. Higher harmonics let a hard coordinate depend on which well a torsion is in, or on cos 3φ as an eclipsed bond angle does. Cos/sin alone left S0 − S1 too low on almost every molecule. It is still better on butane, hexane and trimethoxyethane, by up to 0.13 nats, and on alanine dipeptide, where three harmonics overshoot by 0.6. On each end state alone the coupling is biased downward by about (soft features × hard coordinates) / 2n, as for any Gaussian mutual information. That bias is the same in both end states and cancels in S0 − S1, which was unchanged from 1,250 to 30,000 frames.
+- **MIST** (`--soft-estimator mist`) is the soft estimator for folded peptides. It was within 3.6 nats on chignolin in GBn2 (BQH 5.3) and 28 in vacuum (BQH 35). It also roughly halved the error on the GS chain in vacuum, and it nailed alanine dipeptide (0.08). MIE-2 subtracts every pairwise mutual information and so overcounts dependence when many torsions are coupled, which is why the default overestimated the entropy change of chignolin by 30–165 nats. On small molecules MIST was worse than MIE-2 (RMSE 0.61 against 0.38), most of all with hydrogen bonds (aminopropanol 1.2, trimethoxyethane 1.2). On the disordered GS chain in GBn2 it was worse too (14 against 7).
 - **Per-state coupling** is better when there are few, well-sampled states (biphenyl 0.02, the ring-kept benzamide 0.34), and worse or impossible with many (hexane, decane and longer).
-- **Compact molecules break it.** On folded chignolin it overestimated the entropy change by 25 (GBn2) to 160 (vacuum) nats; BQH was much closer (5 and 35). It also failed on the GS chain in vacuum, but beat BQH on the same chain in implicit solvent. The GABA zwitterion, which folds into a salt bridge, was off by 1.8 nats with only 4 soft torsions.
-- **Rings**: with the topological soft set a puckering cyclohexane falls to QH (0.6 nats); BQH was off by 6.8 there. Soft-set detection with MIE-2 was off by 8–10 nats, because the pairwise MIE cannot represent the ring closure; the joint soft estimator was within 0.14.
+- **Compact molecules are hardest.** The GABA zwitterion, which folds into a salt bridge, was off by 1.0 nats with only 4 soft torsions.
+- **Rings**: with the topological soft set a puckering cyclohexane falls to QH (0.6 nats); BQH was off by 6.8 there. Soft-set detection with MIE-2 was off by 8–10 nats, because the pairwise MIE cannot represent the ring closure; the joint soft estimator was within 0.14. With a benzamide's ring torsions off, plain QH was best.
 - **Linear groups** (1-butyne) need nothing special.
+
+### Best estimator for each system
+
+The lowest RMSE in each row of the table above, and the default's where it was not the best.
+
+| system | best | RMSE | default | notes |
+|---|---|---|---|---|
+| butane, hexane | split, cos/sin | 0.04 | 0.09, 0.13 | one or two multi-basin torsions; BQH also within 0.11 |
+| decane | split, MIST | 0.66 | 0.73 | |
+| hexadecane | split (default) | 0.40 | | |
+| 1-butyne, dichloropropane | split, MIST or default | 0.04–0.06 | 0.05, 0.06 | |
+| ethylene glycol, isoflurane, butylamine, trimethyl phosphate, methylpentanol, trifluoroethylaniline | split (default) | 0.06–0.43 | | |
+| trimethoxyethane | split, cos/sin | 0.20 | 0.33 | |
+| biphenyl †, nitrobenzamide † | split, per-state | 0.02, 0.34 | 0.17, 0.84 | one or two state-defining torsions with well-sampled states |
+| nitrobenzamide, ring torsions off | QH | 0.24 | 3.75 | every split variant is 3–4 nats off |
+| cyclohexane, ring torsions off | split (any) | 0.61 | | no soft torsions, so the split is QH on centered coordinates; BQH 6.8 |
+| GABA zwitterion | split (default) | 1.00 | | next best MIST, 1.8 |
+| aminopropanol ‡, dimethoxyethane ‡, 2,3-dimethylbutane ‡, butylbenzene † ‡ | split (default) | 0.22–0.46 | | |
+| ethyl acetate ‡, N-ethylacetamide ‡ | split, MIST | 0.10, 0.25 | 0.17, 0.34 | |
+| 1-pentanol ‡ | split, per-state | 0.11 | 0.22 | |
+| alanine dipeptide ‡ | split, MIST | 0.08 | 0.75 | the default overshoots by 0.6 |
+| Ace-(GS)<sub>5</sub>-Nme, GBn2 | split (default) | 7.0 | | MIST 14, BQH 22 |
+| Ace-(GS)<sub>5</sub>-Nme, vacuum | split, MIST | 29 | 57 | BQH 41 |
+| chignolin, GBn2 | split, MIST | 3.6 | 30 | BQH 5.3 |
+| chignolin, vacuum | split, MIST | 28 | 165 | BQH 35 |
+
+The default was the best, or within 0.15 nats of the best, on 22 of the 26 small molecules. The exceptions were biphenyl and the ring-kept nitrobenzamide, where per-state coupling was better; the nitrobenzamide with ring torsions off, where QH was better; and alanine dipeptide, where MIST was better. On the peptides MIST was best in three of four. The exception was the disordered chain in implicit solvent.
 
 These results set the defaults and the warning above 20 soft coordinates. They are estimates for these molecules, not error bars for others.

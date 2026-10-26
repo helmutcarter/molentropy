@@ -9,8 +9,8 @@ use crate::basins::{BasinOptions, detect_basins as detect_basins_impl};
 use crate::bat_library::{BondSet, CoordinateKind, CoordinateOptions, InternalCoordinates};
 use crate::quasi_harmonic::{MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions};
 use crate::split::{
-    Coupling, HardEstimator, LARGE_SOFT_SET, SoftEstimator, SoftFeatures, SoftSelection,
-    SplitEntropy, SplitOptions, StateDefinition, StateOptions,
+    Coupling, DEFAULT_HARMONICS, HardEstimator, LARGE_SOFT_SET, SoftEstimator, SoftFeatures,
+    SoftSelection, SplitEntropy, SplitOptions, StateDefinition, StateOptions,
     estimate_split_entropy as split_impl, large_soft_set_warning,
 };
 use crate::{CoordinateMetric, EntropyOptions, FiniteSampleConstant};
@@ -250,6 +250,7 @@ impl SplitArguments {
         hard_estimator: &str,
         coupling: &str,
         soft_features: &str,
+        harmonics: Option<usize>,
         state_coordinates: Option<Vec<usize>>,
         state_labels: Option<Vec<u32>>,
         min_state_frames: usize,
@@ -263,8 +264,9 @@ impl SplitArguments {
         };
         let soft_estimator = match soft_estimator {
             "mie" => SoftEstimator::NearestNeighborMie { order: mie_order },
+            "mist" => SoftEstimator::MutualInformationSpanningTree,
             "joint" => SoftEstimator::JointNearestNeighbor,
-            other => return Err(invalid("soft_estimator", "'mie' or 'joint'", other)),
+            other => return Err(invalid("soft_estimator", "'mie', 'mist' or 'joint'", other)),
         };
         let hard_estimator = match hard_estimator {
             "qh" => HardEstimator::QuasiHarmonic,
@@ -278,10 +280,27 @@ impl SplitArguments {
                 coupling,
             ));
         }
+        if harmonics.is_some() && soft_features != "harmonics" {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "harmonics applies only to soft_features='harmonics'",
+            ));
+        }
         let soft_features = match soft_features {
             "complex" => SoftFeatures::Complex,
             "cossin" => SoftFeatures::CosSin,
-            other => return Err(invalid("soft_features", "'complex' or 'cossin'", other)),
+            "harmonics" if harmonics == Some(0) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "harmonics must be at least 1",
+                ));
+            }
+            "harmonics" => SoftFeatures::Harmonics(harmonics.unwrap_or(DEFAULT_HARMONICS)),
+            other => {
+                return Err(invalid(
+                    "soft_features",
+                    "'complex', 'cossin' or 'harmonics'",
+                    other,
+                ));
+            }
         };
         if coupling != "states" && (state_coordinates.is_some() || state_labels.is_some()) {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -644,7 +663,7 @@ impl System {
     /// Split entropy; see the module function of the same name. `soft=None`
     /// uses the System's soft torsions.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="cossin", state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periodic=true, exact_constant=false, theiler_window=0))]
+    #[pyo3(signature = (soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="harmonics", harmonics=None, state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periodic=true, exact_constant=false, theiler_window=0))]
     fn estimate_split_entropy(
         &self,
         py: Python<'_>,
@@ -654,6 +673,7 @@ impl System {
         hard_estimator: &str,
         coupling: &str,
         soft_features: &str,
+        harmonics: Option<usize>,
         state_coordinates: Option<Vec<usize>>,
         state_labels: Option<Vec<u32>>,
         min_state_frames: usize,
@@ -670,6 +690,7 @@ impl System {
             hard_estimator,
             coupling,
             soft_features,
+            harmonics,
             state_coordinates,
             state_labels,
             min_state_frames,
@@ -885,7 +906,7 @@ fn estimate_coordinate_quasi_harmonic_entropy(
 /// "detect", or a list of coordinate indices from 0; None means "topology"
 /// for a System and "detect" for an array.
 #[allow(clippy::too_many_arguments)]
-#[pyfunction(signature = (data, soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="cossin", state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periods=None, periodic=true, exact_constant=false, theiler_window=0))]
+#[pyfunction(signature = (data, soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="harmonics", harmonics=None, state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periods=None, periodic=true, exact_constant=false, theiler_window=0))]
 fn estimate_split_entropy(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
@@ -895,6 +916,7 @@ fn estimate_split_entropy(
     hard_estimator: &str,
     coupling: &str,
     soft_features: &str,
+    harmonics: Option<usize>,
     state_coordinates: Option<Vec<usize>>,
     state_labels: Option<Vec<u32>>,
     min_state_frames: usize,
@@ -919,6 +941,7 @@ fn estimate_split_entropy(
             hard_estimator,
             coupling,
             soft_features,
+            harmonics,
             state_coordinates,
             state_labels,
             min_state_frames,
@@ -936,6 +959,7 @@ fn estimate_split_entropy(
         hard_estimator,
         coupling,
         soft_features,
+        harmonics,
         state_coordinates,
         state_labels,
         min_state_frames,
