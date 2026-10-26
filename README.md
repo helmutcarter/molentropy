@@ -8,6 +8,7 @@ The crate converts Amber trajectories to internal coordinates (bond lengths, bon
 
 ## Features
 - Estimators: the nearest-neighbor mutual information expansion (NN MIE) up to fourth order, with pairwise mutual information; the mutual information spanning tree (MIST); quasi-harmonic (QH) and Boltzmann quasi-harmonic (BQH) entropy; and a split estimator that treats soft torsions non-parametrically and stiff coordinates with a Gaussian. NN MIE, QH and BQH can also report every coordinate's share of the entropy.
+- A convergence check that repeats any estimate on fewer frames to show how much finite-sample bias remains; see [Convergence check](https://helmutcarter.github.io/nn-entropy/convergence.html).
 - Validated against thermodynamic reference entropies; see [Validation](https://helmutcarter.github.io/nn-entropy/validation.html).
 - A CLI that reads `.parm7` + `.nc`, a Rust library, and Python bindings via `pyo3` for in-memory arrays or file-based calculation.
 - A [user guide](https://helmutcarter.github.io/nn-entropy/) covering the CLI, Python and Rust interfaces and the methods.
@@ -29,7 +30,7 @@ For the Python module, use [maturin](https://www.maturin.rs/): `maturin develop 
 From the command line:
 
 ```bash
-cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|joint] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]
+cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|joint] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N] [--convergence]
 ```
 
 Example:

@@ -2,6 +2,7 @@ use std::env;
 use std::path::Path;
 
 use nn_entropy::bat_library::{BondSet, CoordinateOptions, Geometry, InternalCoordinates};
+use nn_entropy::convergence::check_convergence;
 use nn_entropy::legacy::legacy_entropy;
 use nn_entropy::quasi_harmonic::{
     MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions,
@@ -115,7 +116,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         fail(format!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|joint] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--legacy] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|joint] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N] [--convergence]",
             args[0]
         ));
     }
@@ -136,6 +137,7 @@ fn main() {
     let mut histogram_bins: Option<usize> = None;
     let mut per_coordinate = false;
     let mut mutual_information = false;
+    let mut convergence = false;
     let mut periodic_correlation: Option<PeriodicCorrelation> = None;
     // Split-estimator settings; None leaves the default.
     let mut soft: Option<CoordinateChoice> = None;
@@ -154,6 +156,10 @@ fn main() {
         match args[i].as_str() {
             "--torsions-only" => {
                 torsions_only = true;
+                i += 1;
+            }
+            "--convergence" => {
+                convergence = true;
                 i += 1;
             }
             "--phase-angles" => {
@@ -488,72 +494,77 @@ fn main() {
     };
     const FAILED: &str = "Entropy calculation failed";
 
-    // The total, and for QH and BQH the first-order and correlation terms it
-    // is the sum of.
-    let (entropy, terms) = match estimator {
-        Estimator::Split => {
-            let dim = internal.dim;
-            let to_indices = |flag: &str, numbers: &[usize]| -> Vec<usize> {
-                if let Some(&bad) = numbers.iter().find(|&&n| n > dim) {
-                    fail(format!(
-                        "{flag} coordinate {bad} is beyond the {dim} coordinates"
-                    ));
+    // Split-estimator settings, built here so the convergence check can reuse
+    // them.
+    let dim = internal.dim;
+    let to_indices = |flag: &str, numbers: &[usize]| -> Vec<usize> {
+        if let Some(&bad) = numbers.iter().find(|&&n| n > dim) {
+            fail(format!(
+                "{flag} coordinate {bad} is beyond the {dim} coordinates"
+            ));
+        }
+        numbers.iter().map(|n| n - 1).collect()
+    };
+    let topology_soft = internal.soft_torsions();
+    let symmetric = internal.symmetric_rotor_torsions();
+    let soft_list = match soft.clone().unwrap_or(CoordinateChoice::Topology) {
+        CoordinateChoice::List(numbers) => Some(to_indices("--soft", &numbers)),
+        _ => None,
+    };
+    let defining = match &state_torsions {
+        Some(CoordinateChoice::List(numbers)) => Some(to_indices("--state-torsions", numbers)),
+        _ => None,
+    };
+    let split_settings = split.then(|| {
+        let mut settings = SplitOptions::new(match (&soft, &soft_list) {
+            (_, Some(list)) => SoftSelection::Indices(list),
+            (Some(CoordinateChoice::Detect), _) => SoftSelection::Detect { candidates: None },
+            _ => SoftSelection::Indices(&topology_soft),
+        });
+        if let Some(estimator) = soft_estimator {
+            settings.soft_estimator = match estimator {
+                SoftEstimator::NearestNeighborMie { .. } => {
+                    SoftEstimator::NearestNeighborMie { order: mie_order }
                 }
-                numbers.iter().map(|n| n - 1).collect()
+                joint => joint,
             };
-            let topology_soft = internal.soft_torsions();
-            let symmetric = internal.symmetric_rotor_torsions();
-            let soft_list = match soft.clone().unwrap_or(CoordinateChoice::Topology) {
-                CoordinateChoice::List(numbers) => Some(to_indices("--soft", &numbers)),
-                _ => None,
-            };
-            let defining = match &state_torsions {
-                Some(CoordinateChoice::List(numbers)) => {
-                    Some(to_indices("--state-torsions", numbers))
-                }
-                _ => None,
-            };
-            let mut settings = SplitOptions::new(match (&soft, &soft_list) {
-                (_, Some(list)) => SoftSelection::Indices(list),
-                (Some(CoordinateChoice::Detect), _) => SoftSelection::Detect { candidates: None },
-                _ => SoftSelection::Indices(&topology_soft),
-            });
-            if let Some(estimator) = soft_estimator {
-                settings.soft_estimator = match estimator {
-                    SoftEstimator::NearestNeighborMie { .. } => {
-                        SoftEstimator::NearestNeighborMie { order: mie_order }
+        } else {
+            settings.soft_estimator = SoftEstimator::NearestNeighborMie { order: mie_order };
+        }
+        if let Some(estimator) = hard_estimator {
+            settings.hard_estimator = estimator;
+        }
+        settings.hard.marginals = quasi_harmonic.marginals;
+        if let Some(periodic) = periodic_correlation {
+            settings.hard.periodic = periodic;
+        }
+        settings.coupling = match coupling_flag {
+            CouplingFlag::Gaussian => Coupling::Gaussian {
+                features: match (soft_features, harmonics) {
+                    (Some(SoftFeatures::Harmonics(_)) | None, Some(count)) => {
+                        SoftFeatures::Harmonics(count)
                     }
-                    joint => joint,
-                };
-            } else {
-                settings.soft_estimator = SoftEstimator::NearestNeighborMie { order: mie_order };
-            }
-            if let Some(estimator) = hard_estimator {
-                settings.hard_estimator = estimator;
-            }
-            settings.hard.marginals = quasi_harmonic.marginals;
-            if let Some(periodic) = periodic_correlation {
-                settings.hard.periodic = periodic;
-            }
-            settings.coupling = match coupling_flag {
-                CouplingFlag::Gaussian => Coupling::Gaussian {
-                    features: match (soft_features, harmonics) {
-                        (Some(SoftFeatures::Harmonics(_)) | None, Some(count)) => {
-                            SoftFeatures::Harmonics(count)
-                        }
-                        (features, _) => features.unwrap_or_default(),
-                    },
+                    (features, _) => features.unwrap_or_default(),
                 },
-                CouplingFlag::None => Coupling::None,
-                CouplingFlag::States => Coupling::PerState(StateOptions {
-                    definition: StateDefinition::Detected {
-                        defining: defining.as_deref(),
-                        exclude: if defining.is_some() { &[] } else { &symmetric },
-                    },
-                    min_frames: min_state_frames.unwrap_or(StateOptions::default().min_frames),
-                    ..Default::default()
-                }),
-            };
+            },
+            CouplingFlag::None => Coupling::None,
+            CouplingFlag::States => Coupling::PerState(StateOptions {
+                definition: StateDefinition::Detected {
+                    defining: defining.as_deref(),
+                    exclude: if defining.is_some() { &[] } else { &symmetric },
+                },
+                min_frames: min_state_frames.unwrap_or(StateOptions::default().min_frames),
+                ..Default::default()
+            }),
+        };
+        settings
+    });
+
+    // The total, and for QH and BQH the first-order and correlation terms it
+    // is the sum of; for split, the soft coordinates.
+    let (entropy, terms, split_soft) = match estimator {
+        Estimator::Split => {
+            let settings = split_settings.expect("split settings");
             let result = or_fail(
                 estimate_split_entropy(&one_d_data, used_frames, &settings, &options),
                 FAILED,
@@ -603,11 +614,12 @@ fn main() {
             println!("Soft entropy = {}", result.soft);
             println!("Hard entropy = {}", result.hard);
             println!("Coupling term = {}", result.coupling);
-            (result.total, None)
+            (result.total, None, result.soft_coordinates)
         }
         _ if legacy => (
             or_fail(legacy_entropy(&one_d_data, used_frames), FAILED),
             None,
+            Vec::new(),
         ),
         Estimator::NearestNeighbor => (
             or_fail(
@@ -615,6 +627,7 @@ fn main() {
                 FAILED,
             ),
             None,
+            Vec::new(),
         ),
         Estimator::QuasiHarmonic | Estimator::BoltzmannQuasiHarmonic => {
             let result = or_fail(
@@ -630,11 +643,13 @@ fn main() {
                 (
                     result.quasi_harmonic,
                     Some((result.first_order_gaussian, result.correlation)),
+                    Vec::new(),
                 )
             } else {
                 (
                     result.boltzmann_quasi_harmonic,
                     Some((result.first_order_boltzmann, result.correlation)),
+                    Vec::new(),
                 )
             }
         }
@@ -705,6 +720,57 @@ fn main() {
     if let Some((first_order, correlation)) = terms {
         println!("First-order entropy = {first_order}");
         println!("Correlation term = {correlation}");
+    }
+    if convergence {
+        // The same estimate from every 4th and 2nd frame. The split estimator
+        // keeps the soft set of the full run, so only the frames change.
+        let estimate = |data: &[Vec<f64>], frames: usize, stride: usize| {
+            if stride == 1 {
+                return Ok(entropy);
+            }
+            let options = EntropyOptions {
+                theiler_window: theiler_window.div_ceil(stride),
+                ..options
+            };
+            match estimator {
+                Estimator::Split => {
+                    let mut settings = split_settings.expect("split settings");
+                    settings.soft = SoftSelection::Indices(&split_soft);
+                    estimate_split_entropy(data, frames, &settings, &options).map(|r| r.total)
+                }
+                _ if legacy => legacy_entropy(data, frames),
+                Estimator::NearestNeighbor => calculate_entropy(data, frames, mie_order, &options),
+                Estimator::QuasiHarmonic | Estimator::BoltzmannQuasiHarmonic => {
+                    estimate_quasi_harmonic_entropy(data, frames, &quasi_harmonic, &options).map(
+                        |r| {
+                            if estimator == Estimator::QuasiHarmonic {
+                                r.quasi_harmonic
+                            } else {
+                                r.boltzmann_quasi_harmonic
+                            }
+                        },
+                    )
+                }
+            }
+        };
+        let check = or_fail(
+            check_convergence(&one_d_data, used_frames, estimate),
+            "Convergence check failed",
+        );
+        println!("stride\tframes\tentropy");
+        for point in &check.points {
+            println!("{}\t{}\t{}", point.stride, point.frames, point.entropy);
+        }
+        println!(
+            "Change from {} to {} frames = {}",
+            check.points[1].frames, check.points[2].frames, check.change
+        );
+        println!("Extrapolated entropy = {}", check.extrapolated);
+        if !check.steady() {
+            eprintln!(
+                "Warning: the estimate does not move steadily with the number of frames (up, then down, or the reverse), so the extrapolation is unreliable"
+            );
+        }
     }
     if jacobian {
         // Over the same frames the entropy used.

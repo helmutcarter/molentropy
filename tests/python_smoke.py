@@ -35,6 +35,7 @@ EXPECTED_EXPORTS = {
     "estimate_coordinate_quasi_harmonic_entropy",
     "estimate_split_entropy",
     "detect_basins",
+    "check_convergence",
 }
 
 
@@ -356,6 +357,41 @@ def check_split():
     print(f"split: {result['total']!r}, soft torsions {system.soft_torsions}")
 
 
+def check_convergence():
+    """The estimate on every 4th, 2nd and every frame; an estimator's Python
+    errors come through unchanged."""
+    rng = np.random.default_rng(12)
+    data = rng.normal(size=(3, 2000))
+    calls = []
+
+    def estimate(thinned):
+        calls.append(thinned.shape)
+        return nn_entropy.estimate_entropy(thinned, periods=[None] * 3)
+
+    check = nn_entropy.check_convergence(estimate, data)
+    assert calls == [(3, 500), (3, 1000), (3, 2000)], calls
+    assert check["strides"] == [4, 2, 1] and check["frames"] == [500, 1000, 2000]
+    assert check["entropies"][2] == estimate(data)
+    assert check["change"] == check["entropies"][2] - check["entropies"][1]
+    assert math.isfinite(check["extrapolated"]) and isinstance(check["steady"], bool)
+
+    as_dict = nn_entropy.check_convergence(
+        lambda d: nn_entropy.estimate_split_entropy(d, soft=[], periods=[None] * 3), data
+    )
+    assert len(as_dict["entropies"]) == 3
+
+    def broken(_):
+        raise KeyError("from the estimator")
+
+    try:
+        nn_entropy.check_convergence(broken, data)
+    except KeyError as error:
+        assert "from the estimator" in str(error)
+    else:
+        raise AssertionError("the estimator's error should propagate")
+    print(f"convergence: {check['entropies']}, extrapolated {check['extrapolated']!r}")
+
+
 def main():
     for check in (
         check_exports,
@@ -370,6 +406,7 @@ def main():
         check_coordinate_options,
         check_quasi_harmonic,
         check_split,
+        check_convergence,
     ):
         check()
     print("\nall smoke checks passed")

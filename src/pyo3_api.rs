@@ -7,6 +7,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 use crate::basins::{BasinOptions, detect_basins as detect_basins_impl};
 use crate::bat_library::{BondSet, CoordinateKind, CoordinateOptions, InternalCoordinates};
+use crate::convergence::check_convergence as check_convergence_impl;
 use crate::quasi_harmonic::{MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions};
 use crate::split::{
     Coupling, DEFAULT_HARMONICS, HardEstimator, LARGE_SOFT_SET, SoftEstimator, SoftFeatures,
@@ -14,7 +15,7 @@ use crate::split::{
     estimate_split_entropy as split_impl, large_soft_set_warning,
 };
 use crate::{CoordinateMetric, EntropyOptions, FiniteSampleConstant};
-use numpy::PyReadonlyArray2;
+use numpy::{PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 use std::collections::HashMap;
@@ -980,6 +981,62 @@ fn estimate_split_entropy(
     split_to_dict(py, result)
 }
 
+/// Call `estimate` on every 4th, every 2nd and every frame of `data` (an
+/// array of coordinates by frames, or a System) and report how the estimate
+/// changes. `estimate` takes an array of coordinates by frames and returns a
+/// number, or a dict with a "total". Returns a dict with `strides`, `frames`,
+/// `entropies`, `change` (all frames minus every 2nd frame), `extrapolated`
+/// (to infinitely many frames, assuming a bias that falls as 1/n) and
+/// `steady` (whether the estimate moved the same way at both steps).
+#[pyfunction]
+fn check_convergence(
+    py: Python<'_>,
+    estimate: &Bound<'_, PyAny>,
+    data: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let (one_d_data, frames_end) = match data.extract::<PyRef<'_, System>>() {
+        Ok(system) => (system.one_d_data.clone(), system.frames),
+        Err(_) => array_to_one_d_data(data.extract::<PyReadonlyArray2<f64>>()?),
+    };
+    // A Python error from `estimate` is kept and raised as itself.
+    let mut python_error = None;
+    let result = check_convergence_impl(&one_d_data, frames_end, |thinned, _, _| {
+        let call = || -> PyResult<f64> {
+            let array = PyArray2::from_vec2_bound(py, thinned).map_err(to_py_err)?;
+            let value = estimate.call1((array,))?;
+            match value.downcast::<PyDict>() {
+                Ok(dict) => dict
+                    .get_item("total")?
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyKeyError::new_err(
+                            "estimate returned a dict without a \"total\"",
+                        )
+                    })?
+                    .extract(),
+                Err(_) => value.extract(),
+            }
+        };
+        call().map_err(|err| {
+            let message = err.to_string();
+            python_error = Some(err);
+            message
+        })
+    });
+    let check = match (result, python_error) {
+        (Ok(check), _) => check,
+        (Err(_), Some(err)) => return Err(err),
+        (Err(err), None) => return Err(pyo3::exceptions::PyValueError::new_err(err)),
+    };
+    let dict = PyDict::new_bound(py);
+    dict.set_item("strides", check.points.map(|p| p.stride).to_vec())?;
+    dict.set_item("frames", check.points.map(|p| p.frames).to_vec())?;
+    dict.set_item("entropies", check.points.map(|p| p.entropy).to_vec())?;
+    dict.set_item("change", check.change)?;
+    dict.set_item("extrapolated", check.extrapolated)?;
+    dict.set_item("steady", check.steady())?;
+    Ok(dict.into())
+}
+
 /// The basins of a periodic coordinate, as a dict with `count`, `labels` (the
 /// basin of each value), `boundaries`, `populations`, `resultant` and `soft`
 /// (whether the split estimator would call it soft).
@@ -1025,6 +1082,7 @@ fn nn_entropy(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_quasi_harmonic_entropy, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_split_entropy, m)?)?;
     m.add_function(wrap_pyfunction!(detect_basins, m)?)?;
+    m.add_function(wrap_pyfunction!(check_convergence, m)?)?;
     m.add_function(wrap_pyfunction!(
         estimate_coordinate_quasi_harmonic_entropy,
         m

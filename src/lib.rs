@@ -31,6 +31,8 @@
 //! - **Quasi-harmonic (QH)**, the same function as BQH: a Gaussian fit to
 //!   every coordinate. Fast, but overestimates the entropy of multiwell
 //!   torsions.
+//! - [`convergence::check_convergence`] is not an estimator: it repeats any of
+//!   them on every 4th, 2nd and every frame to show the finite-sample bias.
 //! - [`legacy::legacy_entropy`] reproduces the original Python implementation
 //!   bit for bit and exists only for comparison with historical results.
 //!
@@ -115,6 +117,7 @@ use std::num::NonZero;
 
 pub mod basins;
 pub mod bat_library;
+pub mod convergence;
 pub mod legacy;
 pub mod pyo3_api;
 pub mod quasi_harmonic;

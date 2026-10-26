@@ -16,6 +16,7 @@
 - [Quasi-harmonic estimators](quasi-harmonic.md)
 - [Split estimator](split.md)
 - [Correlated frames](correlated-frames.md)
+- [Convergence check](convergence.md)
 - [Legacy mode](legacy.md)
 
 # Results
