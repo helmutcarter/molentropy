@@ -65,6 +65,18 @@ NN MIE-2 is `calculate_entropy` at order 2.
 "Raw torsions" sets `CoordinateOptions::phase_angles`
 to false.
 
+### Split estimator
+
+The [split estimator](split.md) with the topological soft set, on the same trajectories (`S0 - S1` in nats). 96 configurations were scored: soft estimator {MIE-2, joint with either finite-sample constant} × hard estimator {QH, BQH} × hard phase angles {centered, complex} × coupling {per-state, Gaussian e^{iφ}, Gaussian cos/sin, none} × soft set {topology, detected}.
+
+| estimator | rep 1 | rep 2 | rep 3 | mean error | RMSE |
+|---|---|---|---|---|---|
+| **split** (MIE-2 soft, QH hard, Gaussian coupling) | 14.216 | 14.499 | 14.408 | +0.050 | 0.063 |
+| split, per-state coupling | 14.246 | 14.529 | 14.440 | +0.081 | 0.089 |
+| split, joint soft, BQH hard, no coupling | 14.220 | 14.557 | 14.368 | +0.057 | 0.078 |
+
+On butane the coupling between soft and hard coordinates is small (Gaussian and no coupling differ by 0.001 nats, as do cos/sin and `e^{iφ}` soft features), detection chooses the same soft set as topology, and the finite-sample constant cancels in the difference. Centered hard phase angles beat complex ones by about 0.02 nats, and per-state coupling is about 0.03 nats worse than Gaussian coupling, from the bias of a Gaussian fitted within each state. The split estimator improves on an earlier hand-tuned version of the same decomposition (soft torsions by a joint estimate or MIE-2, hard Gaussian within hand-binned states: +0.06 and +0.14 nats), but plain BQH is better on butane, whose single multi-basin torsion BQH's nearest-neighbor marginals already describe.
+
 ### What it shows
 
 - **BQH with phase angles agrees with the reference within the reference's
@@ -96,3 +108,67 @@ cargo run --release --example butane_validation -- \
 
 Each directory holds `0.0.top`, `0.0.nc`, `1.0.top` and `1.0.nc`; the number
 after it is that replicate's reference `S0 - S1`.
+
+## Small molecules and peptides at 300 K
+
+Butane has one multi-basin torsion. To set the split estimator's defaults and find where it fails, the same comparison was repeated on 18 small molecules and two peptides in two environments, all at 300 K.
+
+### Systems and end states
+
+- **Small molecules**, GAFF2 with AM1-BCC charges, gas phase: alkanes (butane, hexane, decane, hexadecane), molecules from the FreeSolv set, and others chosen as edge cases: a linear group (1-butyne), an intramolecular hydrogen bond (ethylene glycol), a flat double well (biphenyl), a puckering ring (cyclohexane) and a gas-phase zwitterion (GABA).
+- **Peptides**, ff14SB: chignolin (CLN025), a folded β-hairpin, and Ace-(GS)<sub>5</sub>-Nme, a disordered chain, each in vacuum and in GBn2 implicit solvent (mbondi3 radii).
+- **State 1** is the molecule with its full force field. **State 0** keeps bonds and angles but has every dihedral term, charge and Lennard-Jones parameter switched off, and in GBn2 the solvation term too. For the molecules marked † state 0 keeps impropers and the torsions about ring bonds, so rings stay planar and only rotatable bonds become free; for the two marked "ring torsions off" the ring is floppy in state 0.
+
+### Reference
+
+Hamiltonian replica exchange over λ windows (neighbor swaps every ps) with MBAR, along a path that scales the torsions linearly and the nonbonded terms with a soft core (Beutler, α = 0.5), on λ<sub>k</sub> = sin²(πk/2(K−1)). Small molecules: 21 windows of 10 ns, 2 fs steps, X-H bonds constrained; butane and hexane used independent windows and thermodynamic integration instead. Peptides: 32 (GS) or 40 (chignolin) windows of 30 ns, 4 fs steps with hydrogen mass repartitioning. T ΔS = ΔU − ΔA as for butane. Three replicates each; the table gives the mean and standard deviation of S0 − S1.
+
+Checks on the references:
+
+- **Replicates** agree to 0.01–0.12 nats for the small molecules and 0.04–0.4 for the GS chain. Chignolin's differ by up to 6 nats: its folding equilibrium is not converged, so its errors below are good to about ±3 nats.
+- **Finite differences**: for three molecules simulated identically at 300 and 320 K, −∂ΔA/∂T from the two free energies agreed with (ΔU − ΔA)/T within its error (0.03–0.41 nats against errors of 0.2–0.3), which rules out a problem in the mean energies.
+- **Constraints**: four molecules rerun without constraints (1 fs) gave references 0.03–0.07 nats higher. This is within the noise of the comparisons below.
+
+References are therefore good to about ±0.1 nats for the small molecules; differences between estimators smaller than that are not resolved.
+
+### Estimates
+
+Each estimate uses the end-state frames (one per ps) of the same replicate, phase angles and the change in ⟨ln J⟩, as for butane. RMSE in nats over the three replicates against each replicate's own reference; "soft" is the number of topological soft torsions. "Split" is the default (MIE-2 soft, centered QH hard, Gaussian coupling with cos/sin features); the last two columns change only the coupling. "Fails" means no state had enough frames.
+
+| system | soft | reference | QH | BQH | split | split mean error | split, e^{iφ} | split, per-state |
+|---|---|---|---|---|---|---|---|---|
+| butane | 3 | 14.51 ± 0.03 | 1.03 | 0.11 | **0.04** | +0.01 | 0.04 | 0.06 |
+| hexane | 5 | 22.01 ± 0.12 | 1.67 | 0.07 | **0.04** | +0.00 | 0.04 | 0.50 |
+| decane | 9 | 12.17 ± 0.11 | 7.43 | 1.95 | **1.30** | -1.12 | 1.60 | fails |
+| hexadecane | 15 | 21.22 ± 0.12 | 13.13 | 4.34 | **1.22** | -1.17 | 1.86 | fails |
+| 1-butyne | 3 | 0.98 ± 0.02 | 0.69 | 0.11 | **0.07** | -0.05 | 0.07 | 0.07 |
+| dichloropropane | 2 | 2.58 ± 0.03 | 1.79 | 0.54 | **0.22** | -0.22 | 0.25 | 0.15 |
+| ethylene glycol | 3 | 2.96 ± 0.01 | 2.29 | 1.42 | **0.56** | -0.56 | 0.61 | 0.48 |
+| isoflurane | 3 | 4.33 ± 0.08 | 3.21 | 1.50 | **0.29** | -0.29 | 0.45 | 0.27 |
+| butylamine | 4 | 4.19 ± 0.05 | 2.77 | 0.55 | **0.30** | -0.30 | 0.37 | 0.18 |
+| trimethyl phosphate | 6 | 3.77 ± 0.07 | 2.68 | 0.72 | **0.38** | -0.33 | 0.45 | 0.41 |
+| methylpentanol | 6 | 7.48 ± 0.07 | 4.40 | 1.17 | **0.60** | -0.58 | 0.73 | 0.49 |
+| trimethoxyethane | 7 | 9.61 ± 0.03 | 8.13 | 3.27 | **0.20** | -0.00 | 0.34 | 0.22 |
+| trifluoroethylaniline | 4 | 3.31 ± 0.09 | 1.82 | 1.14 | **0.61** | -0.60 | 0.68 | 0.49 |
+| biphenyl † | 1 | 1.40 ± 0.06 | 0.70 | 0.30 | **0.31** | -0.31 | 0.31 | 0.02 |
+| N,N-dimethyl-4-nitrobenzamide † | 5 | 6.90 ± 0.11 | 5.80 | 3.50 | **1.63** | -1.62 | 2.38 | 0.34 |
+| N,N-dimethyl-4-nitrobenzamide, ring torsions off | 5 | 20.11 ± 0.11 | 0.24 | 2.28 | **2.96** | +2.96 | 2.22 | 4.28 |
+| cyclohexane, ring torsions off | 0 | 4.53 ± 0.10 | 0.72 | 6.77 | **0.61** | +0.61 | 0.61 | 0.61 |
+| GABA zwitterion | 4 | 9.58 ± 0.06 | 6.58 | 2.73 | **1.81** | -1.81 | 2.37 | 3.67 |
+| Ace-(GS)5-Nme, GBn2 | 43 | 104.02 ± 0.04 | 31.09 | 22.35 | **9.38** | -8.28 | 10.10 | fails |
+| Ace-(GS)5-Nme, vacuum | 43 | 136.86 ± 0.37 | 50.05 | 40.55 | **53.37** | +53.04 | 51.66 | 63.66 |
+| chignolin CLN025, GBn2 | 50 | 194.59 ± 3.00 | 21.45 | 5.30 | **26.98** | +26.02 | 24.97 | fails |
+| chignolin CLN025, vacuum | 50 | 231.73 ± 3.31 | 53.44 | 35.00 | **158.41** | +157.59 | 154.90 | 193.72 |
+
+QH and BQH are `estimate_quasi_harmonic_entropy` with complex torsions.
+
+### What it shows
+
+- **On small flexible molecules the split estimator is the best general choice.** With up to 15 soft torsions it was within 0.6 nats on 11 of 15 molecules and 1.6 at worst, and better than BQH on all but biphenyl, where they tie. QH misses multi-basin torsions by up to 13 nats.
+- **cos/sin features beat `e^{iφ}`** on 17 of 18 small molecules or tied, by up to 0.8 nats; the exception is the benzamide with free ring torsions. With `e^{iφ}`, S0 − S1 came out too low on almost every molecule, as expected if it misses part of the coupling in state 1, where most of it is.
+- **Per-state coupling** is better when there are few, well-sampled states (biphenyl 0.02, the ring-kept benzamide 0.34), and worse or impossible with many (hexane, decane and longer).
+- **Compact molecules break it.** On folded chignolin it overestimated the entropy change by 25 (GBn2) to 160 (vacuum) nats; BQH was much closer (5 and 35). It also failed on the GS chain in vacuum, but beat BQH on the same chain in implicit solvent. The GABA zwitterion, which folds into a salt bridge, was off by 1.8 nats with only 4 soft torsions.
+- **Rings**: with the topological soft set a puckering cyclohexane falls to QH (0.6 nats); BQH was off by 6.8 there. Soft-set detection with MIE-2 was off by 8–10 nats, because the pairwise MIE cannot represent the ring closure; the joint soft estimator was within 0.14.
+- **Linear groups** (1-butyne) need nothing special.
+
+These results set the defaults and the warning above 20 soft coordinates. They are estimates for these molecules, not error bars for others.
