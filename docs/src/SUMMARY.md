@@ -22,4 +22,5 @@
 
 - [Validation](validation.md)
 - [Interpretation and limitations](limitations.md)
+  - [Finite-sampling bias](finite-sampling-bias.md)
 - [References](references.md)
