@@ -20,6 +20,10 @@
 //!   and of pairs (up to sets of four), combined by a truncated expansion.
 //!   Makes no assumption about the shape of any distribution, but the sum of
 //!   many pairwise terms is noisy.
+//! - **Mutual information spanning tree (MIST)**, [`estimate_mist_entropy`]:
+//!   the same nearest-neighbor terms as MIE-2, keeping only the strongest
+//!   pairwise dependences, so it cannot overcount them when many coordinates
+//!   are coupled.
 //! - **Split**, [`split::estimate_split_entropy`]: soft torsions (about
 //!   rotatable bonds) by a nearest-neighbor estimate, the stiff coordinates by
 //!   a Gaussian, plus a coupling term; for molecules with several coupled
@@ -595,6 +599,70 @@ pub fn estimate_coordinate_mutual_information(
         options.theiler_window,
         &one_d_entropies,
     )
+}
+
+/// Entropy by the mutual information spanning tree (MIST): the sum of the
+/// marginal entropies minus the pairwise mutual information along the maximum
+/// spanning tree of the coordinates (King, Killian and Tidor, J. Phys. Chem. B
+/// 116, 2891, 2012).
+///
+/// With exact terms it is an upper bound on the joint entropy, tighter than the
+/// sum of marginals. MIE-2 subtracts every pairwise mutual information, so when
+/// many coordinates depend on each other, as in a folded chain, it can fall far
+/// below the joint entropy; MIST subtracts only one per coordinate but the
+/// first. It costs the same as MIE-2.
+pub fn estimate_mist_entropy(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    options: &EntropyOptions,
+) -> Result<f64, String> {
+    let (one_d_data, metrics) = resolve_input(one_d_data, frames_end, options)?;
+    let entropies = coordinate_entropy_impl(
+        &one_d_data,
+        &metrics,
+        options.constant,
+        options.theiler_window,
+    )?;
+    let dimensions = entropies.len();
+    let mut tree = 0.0;
+    if dimensions > 1 {
+        let pairs = coordinate_mutual_information_impl(
+            &one_d_data,
+            &metrics,
+            options.constant,
+            options.theiler_window,
+            &entropies,
+        )?;
+        let mut mutual_information = vec![0.0; dimensions * dimensions];
+        let mut pair = 0;
+        for i in 0..dimensions {
+            for j in (i + 1)..dimensions {
+                mutual_information[i * dimensions + j] = pairs[pair];
+                mutual_information[j * dimensions + i] = pairs[pair];
+                pair += 1;
+            }
+        }
+        // Prim's algorithm: grow the tree from coordinate 0 by the strongest
+        // link to a coordinate outside it.
+        let mut in_tree = vec![false; dimensions];
+        in_tree[0] = true;
+        let mut best: Vec<f64> = mutual_information[..dimensions].to_vec();
+        for _ in 1..dimensions {
+            let next = (0..dimensions)
+                .filter(|&j| !in_tree[j])
+                .max_by(|&a, &b| best[a].total_cmp(&best[b]))
+                .expect("a coordinate outside the tree");
+            tree += best[next];
+            in_tree[next] = true;
+            for j in 0..dimensions {
+                let link = mutual_information[next * dimensions + j];
+                if !in_tree[j] && link > best[j] {
+                    best[j] = link;
+                }
+            }
+        }
+    }
+    Ok(entropies.iter().sum::<f64>() - tree)
 }
 
 fn coordinate_mutual_information_impl(

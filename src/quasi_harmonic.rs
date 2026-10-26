@@ -276,8 +276,9 @@ pub(crate) enum Representation {
     Real,
     /// A periodic coordinate as e^(i 2 pi q / P), one complex entry.
     Complex,
-    /// A periodic coordinate as cos and sin of 2 pi q / P, two real entries.
-    CosSin,
+    /// A periodic coordinate as cos and sin of 2 pi k q / P for k = 1 to the
+    /// given number of harmonics, two real entries per harmonic.
+    Harmonics(usize),
 }
 
 impl Representation {
@@ -306,19 +307,22 @@ pub(crate) fn correlation_log_det(
                 (CoordinateMetric::Periodic { period }, Representation::Complex) => {
                     vec![complex_deviations(values, period)]
                 }
-                (CoordinateMetric::Periodic { period }, Representation::CosSin) => {
-                    let complex = complex_deviations(values, period);
-                    vec![
-                        Deviations {
-                            real: complex.real,
-                            imaginary: None,
-                        },
-                        Deviations {
-                            real: complex.imaginary.expect("complex deviations"),
-                            imaginary: None,
-                        },
-                    ]
-                }
+                (CoordinateMetric::Periodic { period }, Representation::Harmonics(count)) => (1
+                    ..=count)
+                    .flat_map(|harmonic| {
+                        let complex = harmonic_deviations(values, period, harmonic);
+                        [
+                            Deviations {
+                                real: complex.real,
+                                imaginary: None,
+                            },
+                            Deviations {
+                                real: complex.imaginary.expect("complex deviations"),
+                                imaginary: None,
+                            },
+                        ]
+                    })
+                    .collect(),
                 (metric, _) => vec![Deviations {
                     real: center(values, metric),
                     imaginary: None,
@@ -365,11 +369,17 @@ impl Deviations {
 
 /// z - <z> for z = e^(i 2 pi q / P).
 fn complex_deviations(values: &[f64], period: f64) -> Deviations {
+    harmonic_deviations(values, period, 1)
+}
+
+/// z - <z> for z = e^(i 2 pi k q / P), the k-th harmonic.
+fn harmonic_deviations(values: &[f64], period: f64, harmonic: usize) -> Deviations {
     let to_radians = std::f64::consts::TAU / period;
+    let k = harmonic as f64;
     let (real, imaginary): (Vec<f64>, Vec<f64>) = values
         .iter()
-        .map(|v| (v * to_radians).cos())
-        .zip(values.iter().map(|v| (v * to_radians).sin()))
+        .map(|v| (k * (v * to_radians)).cos())
+        .zip(values.iter().map(|v| (k * (v * to_radians)).sin()))
         .unzip();
     let center = |series: Vec<f64>| {
         let mean = series.iter().sum::<f64>() / series.len() as f64;

@@ -312,12 +312,28 @@ def check_split():
     assert abs(result["total"] - (result["soft"] + result["hard"] + result["coupling"])) < 1e-12
     assert result["coupling"] <= 0 and result["states"] is None
     assert result["basin_counts"] == [2, None, 1], result["basin_counts"]
+    explicit = nn_entropy.estimate_split_entropy(
+        data, periods=periods, soft_features="harmonics", harmonics=3
+    )
+    assert explicit["total"] == result["total"]
+    cos_sin = nn_entropy.estimate_split_entropy(data, periods=periods, soft_features="cossin")
+    one = nn_entropy.estimate_split_entropy(data, periods=periods, harmonics=1)
+    assert cos_sin["coupling"] == one["coupling"]
+    mist = nn_entropy.estimate_split_entropy(data, periods=periods, soft_estimator="mist")
+    assert mist["soft"] == result["soft"]  # one soft coordinate: MIST is its entropy
 
     states = nn_entropy.estimate_split_entropy(
         data, periods=periods, soft=[0], coupling="states", state_labels=list(well)
     )
     assert len(states["states"]["states"]) == 2 and states["states"]["dropped_frames"] == 0
-    for bad in (dict(soft="topology"), dict(coupling="maybe"), dict(state_labels=[0] * n)):
+    for bad in (
+        dict(soft="topology"),
+        dict(coupling="maybe"),
+        dict(state_labels=[0] * n),
+        dict(harmonics=0),
+        dict(soft_features="cossin", harmonics=2),
+        dict(soft_estimator="tree"),
+    ):
         try:
             nn_entropy.estimate_split_entropy(data, periods=periods, **bad)
         except ValueError:

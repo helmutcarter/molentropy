@@ -8,8 +8,8 @@
 //!
 //! S = S_soft + S_hard + coupling,
 //!
-//! - S_soft: the nearest-neighbor MIE or a joint nearest-neighbor estimate
-//!   over the soft coordinates;
+//! - S_soft: the nearest-neighbor MIE, the mutual information spanning tree
+//!   (MIST) or a joint nearest-neighbor estimate over the soft coordinates;
 //! - S_hard: the quasi-harmonic (QH) or Boltzmann quasi-harmonic (BQH)
 //!   entropy of the hard coordinates over all frames;
 //! - the coupling term, at most 0, for the dependence between the two sets:
@@ -31,7 +31,8 @@ use crate::quasi_harmonic::{
     correlation_log_det, quasi_harmonic_terms,
 };
 use crate::{
-    CoordinateMetric, EntropyOptions, calculate_entropy, estimate_joint_entropy, resolve_input,
+    CoordinateMetric, EntropyOptions, calculate_entropy, estimate_joint_entropy,
+    estimate_mist_entropy, resolve_input,
 };
 
 /// Above this many soft coordinates the front ends warn that the split
@@ -72,6 +73,9 @@ pub enum SoftEstimator {
     /// One joint nearest-neighbor estimate over every soft coordinate, up to
     /// [`MAX_JOINT_DIMENSION`](crate::MAX_JOINT_DIMENSION) of them.
     JointNearestNeighbor,
+    /// The mutual information spanning tree; see
+    /// [`estimate_mist_entropy`].
+    MutualInformationSpanningTree,
 }
 
 impl Default for SoftEstimator {
@@ -93,14 +97,29 @@ pub enum HardEstimator {
 }
 
 /// How soft torsions enter the Gaussian coupling term.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SoftFeatures {
     /// As e^(i phi): one complex entry each.
     Complex,
-    /// As cos(phi) and sin(phi): two real entries each.
-    #[default]
+    /// As cos(phi) and sin(phi): two real entries each. The same as
+    /// `Harmonics(1)`.
     CosSin,
+    /// As cos(k phi) and sin(k phi) for k = 1 to the given number of
+    /// harmonics: two real entries per harmonic. Higher harmonics let a hard
+    /// coordinate depend on which of three wells a torsion is in, not only on
+    /// cos(phi) and sin(phi).
+    Harmonics(usize),
 }
+
+impl Default for SoftFeatures {
+    /// Three harmonics.
+    fn default() -> Self {
+        Self::Harmonics(DEFAULT_HARMONICS)
+    }
+}
+
+/// Harmonics of the default [`SoftFeatures`].
+pub const DEFAULT_HARMONICS: usize = 3;
 
 /// Which conformational states the per-state coupling conditions on.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -185,9 +204,9 @@ impl<'a> SplitOptions<'a> {
     /// The default settings for the soft set `soft`: NN MIE-2 for the soft
     /// coordinates; QH for the hard ones, with hard periodic coordinates
     /// centered on their circular mean; and Gaussian coupling with soft
-    /// torsions as cos(phi) and sin(phi). These scored best overall against
-    /// MBAR references for 18 small molecules; see the validation page of the
-    /// user guide.
+    /// torsions as cos(k phi) and sin(k phi), k = 1 to 3. These scored best
+    /// overall against MBAR references for small molecules, including eight
+    /// held out from the choice; see the validation page of the user guide.
     pub fn new(soft: SoftSelection<'a>) -> Self {
         Self {
             soft,
@@ -326,6 +345,11 @@ pub fn estimate_split_entropy(
                 frames_end,
                 &with_metrics(options, &soft_metrics),
             ),
+            SoftEstimator::MutualInformationSpanningTree => estimate_mist_entropy(
+                &soft_data,
+                frames_end,
+                &with_metrics(options, &soft_metrics),
+            ),
         }
         .map_err(|err| format!("soft set: {err}"))?
     };
@@ -364,7 +388,11 @@ pub fn estimate_split_entropy(
             Coupling::Gaussian { features } => {
                 let soft_representation = match features {
                     SoftFeatures::Complex => Representation::Complex,
-                    SoftFeatures::CosSin => Representation::CosSin,
+                    SoftFeatures::CosSin => Representation::Harmonics(1),
+                    SoftFeatures::Harmonics(0) => {
+                        return Err("soft features need at least one harmonic".to_string());
+                    }
+                    SoftFeatures::Harmonics(count) => Representation::Harmonics(count),
                 };
                 let representation = |i: usize| {
                     if soft_coordinates.contains(&i) {

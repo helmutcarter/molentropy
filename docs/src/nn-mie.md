@@ -16,6 +16,8 @@ In Rust these are the fields of `EntropyOptions`. The CLI and Python have matchi
 
 The MIE builds the entropy from estimates in one to four dimensions. A single nearest-neighbor estimate over a whole set of coordinates is also available, with no expansion: `estimate_joint_entropy` in Rust, for up to 8 coordinates (`MAX_JOINT_DIMENSION`), and the split estimator's `--soft-estimator joint`. It has no truncation error, but its bias grows quickly with the number of coordinates, so it suits small sets such as the soft torsions of a ligand. On a periodic box the nearest-neighbor search skips the periodic images that cannot hold a closer neighbor, which keeps it fast in higher dimensions.
 
+The mutual information spanning tree (MIST; King, Killian and Tidor, *J. Phys. Chem. B* 116, 2891, 2012) uses the same one- and two-dimensional terms as MIE-2, but keeps only the pairwise mutual information along the maximum spanning tree of the coordinates: the sum of the marginal entropies minus one mutual information per coordinate after the first. With exact terms it is an upper bound on the joint entropy. MIE-2 subtracts every pair, so when many coordinates are coupled, as in a folded chain, it can count the same dependence several times and fall far below the joint entropy. MIST cannot. It is `estimate_mist_entropy` in Rust and the split estimator's `--soft-estimator mist`.
+
 ## Notes
 
 - The default second-order mutual-information expansion is a truncation and can omit higher-order correlations.

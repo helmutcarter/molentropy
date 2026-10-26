@@ -14,12 +14,12 @@ use nn_entropy::quasi_harmonic::{
     PeriodicCorrelation, QuasiHarmonicOptions, estimate_quasi_harmonic_entropy,
 };
 use nn_entropy::split::{
-    Coupling, HardEstimator, SoftEstimator, SoftFeatures, SoftSelection, SplitOptions,
-    StateDefinition, StateOptions, estimate_split_entropy,
+    Coupling, DEFAULT_HARMONICS, HardEstimator, SoftEstimator, SoftFeatures, SoftSelection,
+    SplitOptions, StateDefinition, StateOptions, estimate_split_entropy,
 };
 use nn_entropy::{
     CoordinateMetric, EntropyOptions, MAX_JOINT_DIMENSION, calculate_entropy,
-    estimate_joint_entropy,
+    estimate_joint_entropy, estimate_mist_entropy,
 };
 
 const TORSION: CoordinateMetric = CoordinateMetric::Periodic { period: TAU };
@@ -168,6 +168,13 @@ fn without_hard_coordinates_it_is_the_soft_entropy() {
         split(&data, &metrics, &joint).total,
         estimate_joint_entropy(&data, 3_000, &options(&metrics)).unwrap()
     );
+
+    let mut mist = SplitOptions::new(SoftSelection::Indices(&[0, 1, 2]));
+    mist.soft_estimator = SoftEstimator::MutualInformationSpanningTree;
+    assert_eq!(
+        split(&data, &metrics, &mist).total,
+        estimate_mist_entropy(&data, 3_000, &options(&metrics)).unwrap()
+    );
 }
 
 #[test]
@@ -298,14 +305,62 @@ fn cos_sin_features_catch_a_trans_gauche_dependence_that_complex_ones_miss() {
 }
 
 #[test]
-fn the_default_coupling_takes_soft_torsions_as_cos_and_sin() {
+fn the_default_coupling_takes_three_harmonics_of_each_soft_torsion() {
     let settings = SplitOptions::new(SoftSelection::Indices(&[]));
-    assert!(matches!(
+    assert_eq!(DEFAULT_HARMONICS, 3);
+    assert_eq!(
         settings.coupling,
         Coupling::Gaussian {
-            features: SoftFeatures::CosSin
+            features: SoftFeatures::Harmonics(3)
         }
-    ));
+    );
+}
+
+#[test]
+fn one_harmonic_is_cos_and_sin() {
+    let mut rng = Rng::new(84);
+    let (data, _) = well_system(&mut rng, 3_000);
+    let metrics = [TORSION, LINEAR, TORSION];
+    let coupling = |features| {
+        let mut settings = SplitOptions::new(SoftSelection::Indices(&[0]));
+        settings.coupling = Coupling::Gaussian { features };
+        split(&data, &metrics, &settings).coupling
+    };
+    assert_eq!(
+        coupling(SoftFeatures::Harmonics(1)),
+        coupling(SoftFeatures::CosSin)
+    );
+}
+
+#[test]
+fn higher_harmonics_catch_a_threefold_dependence_that_cos_and_sin_miss() {
+    // A free rotor and a hard coordinate that follows cos(3 phi), as a bond
+    // angle strained by eclipsing does. cos(phi) and sin(phi) are uncorrelated
+    // with it; the third harmonic recovers the Gaussian mutual information
+    // -1/2 ln(1 - rho^2) exactly.
+    let mut rng = Rng::new(85);
+    let n = 50_000;
+    let (a, sigma) = (1.0, 0.5);
+    let phi = rng.uniform_vec(n, 0.0, TAU);
+    let x: Vec<f64> = phi
+        .iter()
+        .map(|p| a * (3.0 * p).cos() + sigma * rng.normal())
+        .collect();
+    let data = vec![phi, x];
+    let metrics = [TORSION, LINEAR];
+    let coupling = |features| {
+        let mut settings = SplitOptions::new(SoftSelection::Indices(&[0]));
+        settings.coupling = Coupling::Gaussian { features };
+        split(&data, &metrics, &settings).coupling
+    };
+    let rho_squared = (a * a / 2.0) / (a * a / 2.0 + sigma * sigma);
+    let three = coupling(SoftFeatures::Harmonics(3));
+    assert!(
+        (three - 0.5 * (1.0 - rho_squared).ln()).abs() < 0.01,
+        "{three}"
+    );
+    assert!(coupling(SoftFeatures::CosSin).abs() < 0.001);
+    assert!(coupling(SoftFeatures::Harmonics(2)).abs() < 0.001);
 }
 
 #[test]
@@ -556,6 +611,12 @@ fn invalid_settings_are_refused() {
     windowed.coupling = Coupling::PerState(StateOptions::default());
     assert!(error(&windowed, 1).contains("Theiler window"));
 
+    let mut no_harmonics = SplitOptions::new(SoftSelection::Indices(&[0]));
+    no_harmonics.coupling = Coupling::Gaussian {
+        features: SoftFeatures::Harmonics(0),
+    };
+    assert!(error(&no_harmonics, 0).contains("at least one harmonic"));
+
     let mut too_many = SplitOptions::new(SoftSelection::Indices(&[0]));
     too_many.coupling = Coupling::PerState(StateOptions {
         min_frames: 1,
@@ -595,8 +656,8 @@ mod cli {
     use nn_entropy::EntropyOptions;
     use nn_entropy::bat_library::InternalCoordinates;
     use nn_entropy::split::{
-        Coupling, LARGE_SOFT_SET, SoftSelection, SplitOptions, StateDefinition, StateOptions,
-        estimate_split_entropy,
+        Coupling, LARGE_SOFT_SET, SoftEstimator, SoftFeatures, SoftSelection, SplitOptions,
+        StateDefinition, StateOptions, estimate_split_entropy,
     };
 
     /// A chain molecule (three rotatable bonds) with more frames than
@@ -754,6 +815,51 @@ mod cli {
     }
 
     #[test]
+    fn mist_and_harmonics_flags_match_the_library() {
+        let (top, traj) = chain("cli_mist");
+        let mist = lines(&run(
+            &top,
+            &traj,
+            &[
+                "--estimator",
+                "split",
+                "--soft-estimator",
+                "mist",
+                "--harmonics",
+                "2",
+            ],
+        ));
+        let expected = library(&top, &traj, |settings, _| {
+            settings.soft_estimator = SoftEstimator::MutualInformationSpanningTree;
+            settings.coupling = Coupling::Gaussian {
+                features: SoftFeatures::Harmonics(2),
+            };
+        });
+        assert_eq!(
+            value(&mist, "Soft entropy").parse::<f64>().unwrap(),
+            expected.soft
+        );
+        assert_eq!(
+            value(&mist, "Total entropy").parse::<f64>().unwrap(),
+            expected.total
+        );
+        let cos_sin = lines(&run(
+            &top,
+            &traj,
+            &["--estimator", "split", "--soft-features", "cossin"],
+        ));
+        let expected = library(&top, &traj, |settings, _| {
+            settings.coupling = Coupling::Gaussian {
+                features: SoftFeatures::CosSin,
+            };
+        });
+        assert_eq!(
+            value(&cos_sin, "Coupling term").parse::<f64>().unwrap(),
+            expected.coupling
+        );
+    }
+
+    #[test]
     fn soft_and_state_lists_count_from_one() {
         let (top, traj) = chain("cli_lists");
         let lines = lines(&run(
@@ -829,7 +935,33 @@ mod cli {
                     "--soft-features",
                     "cossin",
                 ][..],
-                "--soft-features applies only",
+                "--soft-features and --harmonics apply only",
+            ),
+            (
+                &[
+                    "--estimator",
+                    "split",
+                    "--soft-features",
+                    "cossin",
+                    "--harmonics",
+                    "2",
+                ][..],
+                "--harmonics applies only to --soft-features harmonics",
+            ),
+            (
+                &["--estimator", "split", "--harmonics", "0"][..],
+                "--harmonics must be at least 1",
+            ),
+            (
+                &[
+                    "--estimator",
+                    "split",
+                    "--soft-estimator",
+                    "mist",
+                    "--mie-order",
+                    "3",
+                ][..],
+                "--mie-order applies only",
             ),
             (
                 &["--estimator", "split", "--state-torsions", "auto"][..],
