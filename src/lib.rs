@@ -510,23 +510,31 @@ pub fn calculate_entropy(
     )
 }
 
-/// Each coordinate's share of the MIE entropy truncated at `mie_order` (1 or 2),
+/// Each coordinate's share of the MIE entropy truncated at `mie_order` (1 to 4),
 /// so the values sum to `calculate_entropy` at the same order.
 ///
-/// Order 1 gives the marginal entropies. Order 2 also splits every pairwise
-/// mutual information term evenly between its two coordinates.
+/// The MIE is a sum of interaction terms: the marginal entropies, minus the
+/// pairwise mutual informations, plus the three-way co-informations, and so
+/// on up to the order. Each term is split evenly among the coordinates it
+/// involves. Order 1 gives the marginal entropies; order 2 splits every
+/// pairwise mutual information evenly between its two coordinates. This is
+/// the Shapley value of the truncated expansion, so it does not depend on the
+/// order of the coordinates.
 pub fn estimate_coordinate_entropy(
     one_d_data: &[Vec<f64>],
     frames_end: usize,
     mie_order: usize,
     options: &EntropyOptions,
 ) -> Result<Vec<f64>, String> {
-    if !(1..=2).contains(&mie_order) {
+    if !(1..=4).contains(&mie_order) {
         return Err(format!(
-            "unsupported per-coordinate MIE order {mie_order}; supported orders are 1 and 2"
+            "unsupported MIE order {mie_order}; supported orders are 1, 2, 3, and 4"
         ));
     }
     let (one_d_data, metrics) = resolve_input(one_d_data, frames_end, options)?;
+    if mie_order > 2 && one_d_data.len() > 2 {
+        return higher_order_coordinate_entropy(&one_d_data, &metrics, mie_order, options);
+    }
     let coordinate_entropies = coordinate_entropy_impl(
         &one_d_data,
         &metrics,
@@ -557,6 +565,99 @@ pub fn estimate_coordinate_entropy(
     }
 
     Ok(coordinate_mie_entropy)
+}
+
+/// [`estimate_coordinate_entropy`] at order 3 or 4.
+///
+/// Splitting each interaction term m(S) evenly among the coordinates of S, and
+/// expanding m(S) by inclusion-exclusion over the joint entropies H(T) of its
+/// subsets, gives coordinate i
+///
+/// sum over t of (a_t - b_t) P_t(i) + b_t T_t,
+///
+/// where T_t sums H(T) over all subsets of t coordinates, P_t(i) over those
+/// that contain i, and for d coordinates and order k
+///
+/// a_t = sum over s = t..=k of C(d - t, s - t) (-1)^(s - t) / s,
+/// b_t = sum over s = t + 1..=k of C(d - t - 1, s - t - 1) (-1)^(s - t) / s
+///
+/// (the weight H(T) carries to a member of T, and to a coordinate outside it).
+fn higher_order_coordinate_entropy(
+    one_d_data: &[Vec<f64>],
+    metrics: &[CoordinateMetric],
+    mie_order: usize,
+    options: &EntropyOptions,
+) -> Result<Vec<f64>, String> {
+    let dimensions = one_d_data.len();
+    let order = mie_order.min(dimensions);
+    let n_frames = one_d_data[0].len();
+    let mut shares = vec![0.0; dimensions];
+    for size in 1..=order {
+        let constant = entropy_constant_with_convention(
+            n_frames,
+            size,
+            options.constant,
+            options.theiler_window,
+        )?;
+        let (total, per_coordinate) = match size {
+            1 => subset_entropy_sums::<1>(one_d_data, metrics, options.theiler_window, constant),
+            2 => subset_entropy_sums::<2>(one_d_data, metrics, options.theiler_window, constant),
+            3 => subset_entropy_sums::<3>(one_d_data, metrics, options.theiler_window, constant),
+            _ => subset_entropy_sums::<4>(one_d_data, metrics, options.theiler_window, constant),
+        }?;
+        let sign = |power: usize| if power.is_multiple_of(2) { 1.0 } else { -1.0 };
+        let member: f64 = (size..=order)
+            .map(|s| binomial(dimensions - size, s - size) as f64 * sign(s - size) / s as f64)
+            .sum();
+        let outside: f64 = (size + 1..=order)
+            .map(|s| {
+                binomial(dimensions - size - 1, s - size - 1) as f64 * sign(s - size) / s as f64
+            })
+            .sum();
+        for (share, contained) in shares.iter_mut().zip(&per_coordinate) {
+            *share += (member - outside) * contained + outside * total;
+        }
+    }
+    Ok(shares)
+}
+
+/// Over all subsets of `K` coordinates: the sum of their joint entropies, and
+/// for each coordinate the sum over the subsets that contain it.
+fn subset_entropy_sums<const K: usize>(
+    one_d_data: &[Vec<f64>],
+    metrics: &[CoordinateMetric],
+    theiler_window: usize,
+    constant: f64,
+) -> Result<(f64, Vec<f64>), String> {
+    let dimensions = one_d_data.len();
+    let reciprocal_n_frames = (one_d_data[0].len() as f64).recip();
+    (0..binomial(dimensions, K))
+        .into_par_iter()
+        .try_fold(
+            || (0.0, vec![0.0; dimensions]),
+            |(mut total, mut per_coordinate), rank| {
+                let subset = combination_from_rank::<K>(rank, dimensions);
+                let distance = calc_joint_nn_with_window(
+                    subset.map(|i| one_d_data[i].as_slice()),
+                    subset.map(|i| metrics[i]),
+                    theiler_window,
+                )?;
+                let entropy =
+                    estimate_entropy_efficient(distance * K as f64, reciprocal_n_frames, constant);
+                total += entropy;
+                for i in subset {
+                    per_coordinate[i] += entropy;
+                }
+                Ok::<_, String>((total, per_coordinate))
+            },
+        )
+        .try_reduce(
+            || (0.0, vec![0.0; dimensions]),
+            |(left_total, mut left), (right_total, right)| {
+                left.iter_mut().zip(right).for_each(|(a, b)| *a += b);
+                Ok((left_total + right_total, left))
+            },
+        )
 }
 
 fn coordinate_entropy_impl(
@@ -616,6 +717,39 @@ pub fn estimate_mist_entropy(
     frames_end: usize,
     options: &EntropyOptions,
 ) -> Result<f64, String> {
+    let (entropies, links) = mist_tree(one_d_data, frames_end, options)?;
+    let tree: f64 = links.iter().map(|link| link.2).sum();
+    Ok(entropies.iter().sum::<f64>() - tree)
+}
+
+/// Each coordinate's share of [`estimate_mist_entropy`]: its marginal entropy,
+/// minus half the mutual information of each spanning-tree link it is part of.
+/// This is the even split of [`estimate_coordinate_entropy`] at order 2,
+/// restricted to the links the tree keeps. The shares sum to the MIST entropy.
+pub fn estimate_coordinate_mist_entropy(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    options: &EntropyOptions,
+) -> Result<Vec<f64>, String> {
+    let (mut shares, links) = mist_tree(one_d_data, frames_end, options)?;
+    for (a, b, mutual_information) in links {
+        shares[a] -= 0.5 * mutual_information;
+        shares[b] -= 0.5 * mutual_information;
+    }
+    Ok(shares)
+}
+
+/// A spanning-tree link: two coordinates and their mutual information.
+type TreeLink = (usize, usize, f64);
+
+/// The marginal entropies, and the links of the maximum spanning tree of the
+/// pairwise mutual information as (coordinate, coordinate, mutual
+/// information), in the order Prim's algorithm adds them.
+fn mist_tree(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    options: &EntropyOptions,
+) -> Result<(Vec<f64>, Vec<TreeLink>), String> {
     let (one_d_data, metrics) = resolve_input(one_d_data, frames_end, options)?;
     let entropies = coordinate_entropy_impl(
         &one_d_data,
@@ -624,7 +758,7 @@ pub fn estimate_mist_entropy(
         options.theiler_window,
     )?;
     let dimensions = entropies.len();
-    let mut tree = 0.0;
+    let mut links = Vec::with_capacity(dimensions.saturating_sub(1));
     if dimensions > 1 {
         let pairs = coordinate_mutual_information_impl(
             &one_d_data,
@@ -647,22 +781,24 @@ pub fn estimate_mist_entropy(
         let mut in_tree = vec![false; dimensions];
         in_tree[0] = true;
         let mut best: Vec<f64> = mutual_information[..dimensions].to_vec();
+        let mut nearest = vec![0; dimensions];
         for _ in 1..dimensions {
             let next = (0..dimensions)
                 .filter(|&j| !in_tree[j])
                 .max_by(|&a, &b| best[a].total_cmp(&best[b]))
                 .expect("a coordinate outside the tree");
-            tree += best[next];
+            links.push((nearest[next], next, best[next]));
             in_tree[next] = true;
             for j in 0..dimensions {
                 let link = mutual_information[next * dimensions + j];
                 if !in_tree[j] && link > best[j] {
                     best[j] = link;
+                    nearest[j] = next;
                 }
             }
         }
     }
-    Ok(entropies.iter().sum::<f64>() - tree)
+    Ok((entropies, links))
 }
 
 fn coordinate_mutual_information_impl(

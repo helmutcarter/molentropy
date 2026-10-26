@@ -22,7 +22,7 @@ The covariance is the population covariance over the selected frames, so there m
 - are each at most 0, because C has a unit diagonal, and are about 0 for a coordinate independent of the others,
 - split the correlation of two coordinates evenly: each receives `¼ ln(1 - |ρ|²)`.
 
-Like the NN MIE's even split of pairwise mutual information, this is one convention for dividing a quantity that belongs to the whole set; its advantage is that it involves no further choices, such as an ordering of the coordinates.
+Like the NN MIE's even split of pairwise mutual information, this is one convention for dividing a quantity that belongs to the whole set; its advantage is that it involves no further choices, such as an ordering of the coordinates. [Per-coordinate entropies](per-coordinate.md) compares the conventions of every estimator.
 
 The [split estimator](split.md) combines both approaches: QH or BQH for the stiff coordinates, a nearest-neighbor estimate for the soft torsions, and the Gaussian correlation term of this page for the coupling between them.
 

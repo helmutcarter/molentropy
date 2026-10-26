@@ -28,11 +28,12 @@ use std::collections::{BTreeMap, HashMap};
 use crate::basins::{BasinOptions, Basins, detect_basins};
 use crate::quasi_harmonic::{
     MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions, Representation,
-    correlation_log_det, quasi_harmonic_terms,
+    coordinate_quasi_harmonic_terms, correlation_log_det, correlation_log_diagonal,
+    quasi_harmonic_terms,
 };
 use crate::{
-    CoordinateMetric, EntropyOptions, calculate_entropy, estimate_joint_entropy,
-    estimate_mist_entropy, resolve_input,
+    CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_entropy,
+    estimate_coordinate_mist_entropy, estimate_joint_entropy, estimate_mist_entropy, resolve_input,
 };
 
 /// Above this many soft coordinates the front ends warn that the split
@@ -281,6 +282,71 @@ pub fn estimate_split_entropy(
     split: &SplitOptions,
     options: &EntropyOptions,
 ) -> Result<SplitEntropy, String> {
+    split_parts(one_d_data, frames_end, split, options, false).map(|(entropy, _)| entropy)
+}
+
+/// Each coordinate's share of a split entropy, in units of k_B.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoordinateSplitEntropy {
+    /// `own + coupling` for each coordinate; sums to `split.total`.
+    pub total: Vec<f64>,
+    /// A soft coordinate's share of the soft entropy, or a hard coordinate's
+    /// of the hard entropy; sums to `split.soft + split.hard`.
+    pub own: Vec<f64>,
+    /// Each coordinate's share of the coupling term; sums to
+    /// `split.coupling`.
+    pub coupling: Vec<f64>,
+    /// The split entropy the shares divide.
+    pub split: SplitEntropy,
+}
+
+/// Each coordinate's share of [`estimate_split_entropy`].
+///
+/// - Soft coordinates take their shares of the soft entropy as
+///   [`estimate_coordinate_entropy`] (MIE) or
+///   [`estimate_coordinate_mist_entropy`] (MIST) gives them. The joint soft
+///   estimate has no such split and is refused.
+/// - Hard coordinates take their shares of the QH or BQH entropy as
+///   [`estimate_coordinate_quasi_harmonic_entropy`](crate::quasi_harmonic::estimate_coordinate_quasi_harmonic_entropy)
+///   gives them: first-order term plus 1/2 (log C)_ii.
+/// - The Gaussian coupling 1/2 [ln|C(S+H)| - ln|C(S)| - ln|C(H)|] is shared
+///   the same way: coordinate i receives 1/2 [(log C(S+H))_ii - (log C(S))_ii]
+///   if soft, with C(H) if hard, summed over its entries (two per harmonic of
+///   a soft torsion). Unlike a QH correlation share, one coordinate's
+///   coupling share can be positive; their sum cannot.
+/// - The per-state coupling gives each hard coordinate its population-weighted
+///   share of the hard entropy within the states, minus its share over all
+///   frames, and soft coordinates 0.
+///
+/// Every set of shares sums to its term up to rounding. The terms in `split`
+/// are those of [`estimate_split_entropy`] exactly.
+pub fn estimate_coordinate_split_entropy(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    split: &SplitOptions,
+    options: &EntropyOptions,
+) -> Result<CoordinateSplitEntropy, String> {
+    let (split, shares) = split_parts(one_d_data, frames_end, split, options, true)?;
+    let (own, coupling) = shares.expect("shares were requested");
+    Ok(CoordinateSplitEntropy {
+        total: own.iter().zip(&coupling).map(|(a, b)| a + b).collect(),
+        own,
+        coupling,
+        split,
+    })
+}
+
+/// Each coordinate's share of the soft or hard entropy, and of the coupling.
+type Shares = (Vec<f64>, Vec<f64>);
+
+/// The split entropy, and with `want_shares` each coordinate's shares of it.
+fn split_parts(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    split: &SplitOptions,
+    options: &EntropyOptions,
+    want_shares: bool,
+) -> Result<(SplitEntropy, Option<Shares>), String> {
     let (data, metrics) = resolve_input(one_d_data, frames_end, options)?;
     let dimensions = data.len();
     let mut basins: HashMap<usize, Basins> = HashMap::new();
@@ -327,13 +393,16 @@ pub fn estimate_split_entropy(
     let columns =
         |indices: &[usize]| -> Vec<Vec<f64>> { indices.iter().map(|&i| data[i].clone()).collect() };
 
+    let mut own = vec![0.0; dimensions];
+    let mut coupling_shares = vec![0.0; dimensions];
+
     // Soft entropy.
     let soft = if soft_coordinates.is_empty() {
         0.0
     } else {
         let soft_metrics = subset_options(&soft_coordinates);
         let soft_data = columns(&soft_coordinates);
-        match split.soft_estimator {
+        let soft = match split.soft_estimator {
             SoftEstimator::NearestNeighborMie { order } => calculate_entropy(
                 &soft_data,
                 frames_end,
@@ -351,32 +420,73 @@ pub fn estimate_split_entropy(
                 &with_metrics(options, &soft_metrics),
             ),
         }
-        .map_err(|err| format!("soft set: {err}"))?
+        .map_err(|err| format!("soft set: {err}"))?;
+        if want_shares {
+            let soft_options = with_metrics(options, &soft_metrics);
+            let shares = match split.soft_estimator {
+                SoftEstimator::NearestNeighborMie { order } => {
+                    estimate_coordinate_entropy(&soft_data, frames_end, order, &soft_options)
+                }
+                SoftEstimator::MutualInformationSpanningTree => {
+                    estimate_coordinate_mist_entropy(&soft_data, frames_end, &soft_options)
+                }
+                SoftEstimator::JointNearestNeighbor => Err(
+                    "the joint soft estimate has no per-coordinate split; use the MIE or MIST"
+                        .to_string(),
+                ),
+            }
+            .map_err(|err| format!("soft set: {err}"))?;
+            for (&index, share) in soft_coordinates.iter().zip(shares) {
+                own[index] = share;
+            }
+        }
+        soft
     };
 
     // Hard entropy over all frames.
     let hard_metrics = subset_options(&hard_coordinates);
     let hard_data = columns(&hard_coordinates);
-    let hard_entropy = |data: &[Vec<f64>], frames: usize| -> Result<f64, String> {
+    // The hard entropy of some frames, and with `want_shares` each hard
+    // coordinate's share of it.
+    let hard_entropy = |data: &[Vec<f64>], frames: usize| -> Result<HardParts, String> {
         let boltzmann = split.hard_estimator == HardEstimator::BoltzmannQuasiHarmonic;
-        let terms = quasi_harmonic_terms(
-            data,
-            frames,
-            &split.hard,
-            &with_metrics(options, &hard_metrics),
-            boltzmann,
-        )?;
-        Ok(if boltzmann {
+        let hard_options = with_metrics(options, &hard_metrics);
+        let terms = quasi_harmonic_terms(data, frames, &split.hard, &hard_options, boltzmann)?;
+        let total = if boltzmann {
             terms.boltzmann_quasi_harmonic
         } else {
             terms.quasi_harmonic
-        })
+        };
+        // A failed split leaves the total, so the same frames count with and
+        // without shares; the callers refuse a missing split.
+        let shares = want_shares
+            .then(|| {
+                coordinate_quasi_harmonic_terms(data, frames, &split.hard, &hard_options, boltzmann)
+                    .ok()
+            })
+            .flatten()
+            .map(|terms| {
+                if boltzmann {
+                    terms.boltzmann_quasi_harmonic
+                } else {
+                    terms.quasi_harmonic
+                }
+            });
+        Ok((total, shares))
     };
-    let hard = if hard_coordinates.is_empty() {
-        0.0
+    let (hard, hard_shares) = if hard_coordinates.is_empty() {
+        (0.0, None)
     } else {
         hard_entropy(&hard_data, frames_end).map_err(|err| format!("hard set: {err}"))?
     };
+    if want_shares && !hard_coordinates.is_empty() {
+        let shares = hard_shares.as_ref().ok_or_else(|| {
+            "hard set: its entropy could not be split between its coordinates".to_string()
+        })?;
+        for (&index, &share) in hard_coordinates.iter().zip(shares) {
+            own[index] = share;
+        }
+    }
 
     // Coupling.
     let mut states = None;
@@ -401,17 +511,45 @@ pub fn estimate_split_entropy(
                         Representation::of(metrics[i], split.hard.periodic)
                     }
                 };
-                let log_det = |indices: &[usize]| -> Result<f64, String> {
+                let inputs = |indices: &[usize]| {
                     let columns: Vec<&[f64]> =
                         indices.iter().map(|&i| data[i].as_slice()).collect();
                     let representations: Vec<Representation> =
                         indices.iter().map(|&i| representation(i)).collect();
-                    correlation_log_det(&columns, &subset_options(indices), &representations)
+                    (columns, subset_options(indices), representations)
+                };
+                let log_det = |indices: &[usize]| -> Result<f64, String> {
+                    let (columns, metrics, representations) = inputs(indices);
+                    correlation_log_det(&columns, &metrics, &representations)
                 };
                 let all: Vec<usize> = (0..dimensions).collect();
-                0.5 * (log_det(&all).map_err(|err| format!("soft and hard sets: {err}"))?
-                    - log_det(&soft_coordinates).map_err(|err| format!("soft set: {err}"))?
-                    - log_det(&hard_coordinates).map_err(|err| format!("hard set: {err}"))?)
+                let coupling = 0.5
+                    * (log_det(&all).map_err(|err| format!("soft and hard sets: {err}"))?
+                        - log_det(&soft_coordinates).map_err(|err| format!("soft set: {err}"))?
+                        - log_det(&hard_coordinates).map_err(|err| format!("hard set: {err}"))?);
+                if want_shares {
+                    // The eigendecomposition behind the shares is stricter about
+                    // near-singular matrices than the Cholesky factor behind the
+                    // total: higher harmonics of a soft torsion that barely moves
+                    // are nearly collinear (sin k phi is about k phi).
+                    let log_diagonal = |indices: &[usize]| -> Result<Vec<f64>, String> {
+                        let (columns, metrics, representations) = inputs(indices);
+                        correlation_log_diagonal(&columns, &metrics, &representations).map_err(
+                            |err| {
+                                format!(
+                                    "coupling shares: {err}; if some soft torsions barely move, their harmonics are nearly collinear: use fewer harmonics or the cos/sin features"
+                                )
+                            },
+                        )
+                    };
+                    let joint = log_diagonal(&all)?;
+                    for set in [&soft_coordinates, &hard_coordinates] {
+                        for (&index, alone) in set.iter().zip(log_diagonal(set)?) {
+                            coupling_shares[index] = 0.5 * (joint[index] - alone);
+                        }
+                    }
+                }
+                coupling
             }
             Coupling::PerState(state_options) => {
                 if options.theiler_window > 0
@@ -452,17 +590,23 @@ pub fn estimate_split_entropy(
                         (defining, labels)
                     }
                 };
-                let summary = per_state(
+                let (conditional, summary, conditional_shares) = per_state(
                     &hard_data,
                     &labels,
-                    hard,
+                    (hard, hard_shares.as_deref()),
                     &state_options,
                     hard_coordinates.len(),
                     &hard_entropy,
                     defining,
                 )?;
-                let conditional = summary.0;
-                states = Some(summary.1);
+                states = Some(summary);
+                if let (Some(conditional), Some(over_all)) = (conditional_shares, &hard_shares) {
+                    for ((&index, within), all) in
+                        hard_coordinates.iter().zip(conditional).zip(over_all)
+                    {
+                        coupling_shares[index] = within - all;
+                    }
+                }
                 conditional - hard
             }
         }
@@ -471,7 +615,7 @@ pub fn estimate_split_entropy(
     let basin_counts = (0..dimensions)
         .map(|i| basins.get(&i).map(|b| b.count))
         .collect();
-    Ok(SplitEntropy {
+    let entropy = SplitEntropy {
         total: soft + hard + coupling,
         soft,
         hard,
@@ -480,22 +624,29 @@ pub fn estimate_split_entropy(
         hard_coordinates,
         basin_counts,
         states,
-    })
+    };
+    Ok((entropy, want_shares.then_some((own, coupling_shares))))
 }
 
-/// The hard entropy of some frames' hard columns: (columns, frame count).
-type HardEntropy<'a> = dyn Fn(&[Vec<f64>], usize) -> Result<f64, String> + 'a;
+/// A hard entropy, and each hard coordinate's share of it when asked for.
+type HardParts = (f64, Option<Vec<f64>>);
 
-/// The population-weighted hard entropy over the states, and the states.
+/// The hard entropy of some frames' hard columns: (columns, frame count).
+type HardEntropy<'a> = dyn Fn(&[Vec<f64>], usize) -> Result<HardParts, String> + 'a;
+
+/// The population-weighted hard entropy over the states, the states, and the
+/// population-weighted shares of each hard coordinate when `hard_over_all_frames`
+/// has shares.
 fn per_state(
     hard_data: &[Vec<f64>],
     labels: &[Vec<u32>],
-    hard_over_all_frames: f64,
+    hard_over_all_frames: (f64, Option<&[f64]>),
     options: &StateOptions,
     hard_dimensions: usize,
     hard_entropy: &HardEntropy,
     defining: Vec<usize>,
-) -> Result<(f64, StateSummary), String> {
+) -> Result<(f64, StateSummary, Option<Vec<f64>>), String> {
+    let (hard_over_all_frames, shares_over_all_frames) = hard_over_all_frames;
     let frames_end = labels.len();
     let mut groups: BTreeMap<&[u32], Vec<usize>> = BTreeMap::new();
     for (frame, label) in labels.iter().enumerate() {
@@ -517,6 +668,7 @@ fn per_state(
                 dropped_frames: 0,
                 dropped_population: 0.0,
             },
+            shares_over_all_frames.map(<[f64]>::to_vec),
         ));
     }
     let large = groups
@@ -533,6 +685,7 @@ fn per_state(
     let threshold = options.min_frames.max(hard_dimensions + 2);
     let mut states = Vec::with_capacity(groups.len());
     let (mut weighted, mut used) = (0.0, 0.0);
+    let mut weighted_shares = shares_over_all_frames.map(|shares| vec![0.0; shares.len()]);
     for (basins, frames) in groups {
         let population = frames.len() as f64 / frames_end as f64;
         let entropy = if frames.len() < threshold {
@@ -544,8 +697,21 @@ fn per_state(
                 .collect();
             hard_entropy(&gathered, frames.len())
                 .ok()
-                .filter(|e| e.is_finite())
+                .filter(|(e, _)| e.is_finite())
         };
+        if let Some((_, shares)) = &entropy
+            && let Some(weighted_shares) = weighted_shares.as_mut()
+        {
+            let shares = shares.as_ref().ok_or_else(|| {
+                format!(
+                    "the hard entropy of state {basins:?} could not be split between its coordinates"
+                )
+            })?;
+            for (sum, share) in weighted_shares.iter_mut().zip(shares) {
+                *sum += population * share;
+            }
+        }
+        let entropy = entropy.map(|(e, _)| e);
         if let Some(entropy) = entropy {
             weighted += population * entropy;
             used += population;
@@ -575,6 +741,7 @@ fn per_state(
             dropped_frames,
             dropped_population: 1.0 - used,
         },
+        weighted_shares.map(|shares| shares.into_iter().map(|s| s / used).collect()),
     ))
 }
 

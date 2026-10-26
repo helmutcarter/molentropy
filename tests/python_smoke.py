@@ -135,6 +135,10 @@ def check_mie_entropy_sums_to_second_order_total():
     total = nn_entropy.estimate_entropy(data)
     assert abs(total - nn_entropy.estimate_entropy(data, mie_order=2)) < 1e-12
     assert abs(sum(per_coordinate) - total) < 1e-9, (sum(per_coordinate), total)
+    for order in (3, 4):
+        shares = nn_entropy.estimate_coordinate_entropy(data, mie_order=order)
+        order_total = nn_entropy.estimate_entropy(data, mie_order=order)
+        assert abs(sum(shares) - order_total) < 1e-9, (order, sum(shares), order_total)
     print(f"order-2 additivity: {total!r}")
 
 
@@ -319,6 +323,12 @@ def check_split():
     cos_sin = nn_entropy.estimate_split_entropy(data, periods=periods, soft_features="cossin")
     one = nn_entropy.estimate_split_entropy(data, periods=periods, harmonics=1)
     assert cos_sin["coupling"] == one["coupling"]
+    shares = nn_entropy.estimate_split_entropy(data, periods=periods, per_coordinate=True)
+    assert "coordinates" not in result and shares["total"] == result["total"]
+    parts = shares["coordinates"]
+    for key, term in (("total", result["total"]), ("coupling", result["coupling"])):
+        assert abs(sum(parts[key]) - term) < 1e-9, (key, sum(parts[key]), term)
+    assert abs(sum(parts["own"]) - result["soft"] - result["hard"]) < 1e-9
     mist = nn_entropy.estimate_split_entropy(data, periods=periods, soft_estimator="mist")
     assert mist["soft"] == result["soft"]  # one soft coordinate: MIST is its entropy
 

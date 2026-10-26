@@ -15,6 +15,7 @@
 - [Nearest-neighbor MIE](nn-mie.md)
 - [Quasi-harmonic estimators](quasi-harmonic.md)
 - [Split estimator](split.md)
+- [Per-coordinate entropies](per-coordinate.md)
 - [Correlated frames](correlated-frames.md)
 - [Legacy mode](legacy.md)
 

@@ -9,7 +9,8 @@ use nn_entropy::quasi_harmonic::{
 };
 use nn_entropy::split::{
     Coupling, HardEstimator, LARGE_SOFT_SET, SoftEstimator, SoftFeatures, SoftSelection,
-    SplitOptions, StateDefinition, StateOptions, estimate_split_entropy, large_soft_set_warning,
+    SplitOptions, StateDefinition, StateOptions, estimate_coordinate_split_entropy,
+    estimate_split_entropy, large_soft_set_warning,
 };
 use nn_entropy::{
     CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy,
@@ -381,9 +382,6 @@ fn main() {
     {
         fail("--state-torsions and --min-state-frames apply only to --coupling states");
     }
-    if split && (per_coordinate || mutual_information) {
-        fail("--per-coordinate and --mutual-information cannot be combined with --estimator split");
-    }
     if split
         && soft
             .as_ref()
@@ -393,9 +391,6 @@ fn main() {
         fail(
             "--soft topology needs phase angles: drop --no-phase-angles, or pass --soft detect or a list",
         );
-    }
-    if per_coordinate && estimator == Estimator::NearestNeighbor && mie_order > 2 {
-        fail("--per-coordinate supports --mie-order 1 or 2");
     }
     if mutual_information && estimator != Estimator::NearestNeighbor {
         fail("--mutual-information applies only to --estimator nn");
@@ -490,6 +485,8 @@ fn main() {
 
     // The total, and for QH and BQH the first-order and correlation terms it
     // is the sum of.
+    // With --per-coordinate, each coordinate's shares of the split entropy.
+    let mut split_shares = None;
     let (entropy, terms) = match estimator {
         Estimator::Split => {
             let dim = internal.dim;
@@ -554,10 +551,25 @@ fn main() {
                     ..Default::default()
                 }),
             };
-            let result = or_fail(
-                estimate_split_entropy(&one_d_data, used_frames, &settings, &options),
-                FAILED,
-            );
+            let result = if per_coordinate {
+                let shares = or_fail(
+                    estimate_coordinate_split_entropy(
+                        &one_d_data,
+                        used_frames,
+                        &settings,
+                        &options,
+                    ),
+                    FAILED,
+                );
+                let result = shares.split.clone();
+                split_shares = Some(shares);
+                result
+            } else {
+                or_fail(
+                    estimate_split_entropy(&one_d_data, used_frames, &settings, &options),
+                    FAILED,
+                )
+            };
             let numbers = |indices: &[usize]| {
                 indices
                     .iter()
@@ -650,7 +662,23 @@ fn main() {
             .join("-");
         format!("{}\t{kind}\t{atoms}", index + 1)
     };
-    if per_coordinate {
+    if let Some(shares) = &split_shares {
+        println!("coordinate\ttype\tatoms\tentropy\tset\town\tcoupling");
+        for index in 0..shares.total.len() {
+            let set = if shares.split.soft_coordinates.contains(&index) {
+                "soft"
+            } else {
+                "hard"
+            };
+            println!(
+                "{}\t{}\t{set}\t{}\t{}",
+                describe(index),
+                shares.total[index],
+                shares.own[index],
+                shares.coupling[index]
+            );
+        }
+    } else if per_coordinate {
         const PER_COORDINATE_FAILED: &str = "Per-coordinate entropy calculation failed";
         if estimator == Estimator::NearestNeighbor {
             let values = or_fail(

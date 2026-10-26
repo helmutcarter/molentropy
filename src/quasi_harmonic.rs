@@ -159,7 +159,25 @@ pub fn estimate_coordinate_quasi_harmonic_entropy(
     quasi_harmonic: &QuasiHarmonicOptions,
     options: &EntropyOptions,
 ) -> Result<CoordinateQuasiHarmonicEntropy, String> {
-    let terms = terms(one_d_data, frames_end, quasi_harmonic, options, true)?;
+    coordinate_quasi_harmonic_terms(one_d_data, frames_end, quasi_harmonic, options, true)
+}
+
+/// [`estimate_coordinate_quasi_harmonic_entropy`], optionally without the
+/// first-order Boltzmann terms, whose fields are then NaN.
+pub(crate) fn coordinate_quasi_harmonic_terms(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    quasi_harmonic: &QuasiHarmonicOptions,
+    options: &EntropyOptions,
+    need_boltzmann: bool,
+) -> Result<CoordinateQuasiHarmonicEntropy, String> {
+    let terms = terms(
+        one_d_data,
+        frames_end,
+        quasi_harmonic,
+        options,
+        need_boltzmann,
+    )?;
     let correlation: Vec<f64> = log_diagonal(&terms.correlation)?
         .into_iter()
         .map(|value| 0.5 * value)
@@ -299,11 +317,42 @@ pub(crate) fn correlation_log_det(
     metrics: &[CoordinateMetric],
     representations: &[Representation],
 ) -> Result<f64, String> {
-    let deviations: Vec<Deviations> = columns
+    let (deviations, _) = represented_deviations(columns, metrics, representations)?;
+    log_determinant(&correlation_matrix(&deviations))
+}
+
+/// Each column's share of [`correlation_log_det`]: the sum of (log C)_ii over
+/// the entries of C that the column contributes (one, or two per harmonic).
+/// The shares sum to ln|C|.
+pub(crate) fn correlation_log_diagonal(
+    columns: &[&[f64]],
+    metrics: &[CoordinateMetric],
+    representations: &[Representation],
+) -> Result<Vec<f64>, String> {
+    let (deviations, owners) = represented_deviations(columns, metrics, representations)?;
+    let mut shares = vec![0.0; columns.len()];
+    for (owner, value) in owners
+        .into_iter()
+        .zip(log_diagonal(&correlation_matrix(&deviations))?)
+    {
+        shares[owner] += value;
+    }
+    Ok(shares)
+}
+
+/// The standardized deviations of `columns` as `representations` says, and
+/// the column each came from.
+fn represented_deviations(
+    columns: &[&[f64]],
+    metrics: &[CoordinateMetric],
+    representations: &[Representation],
+) -> Result<(Vec<Deviations>, Vec<usize>), String> {
+    let (deviations, owners): (Vec<Deviations>, Vec<usize>) = columns
         .par_iter()
         .zip(metrics.par_iter().zip(representations.par_iter()))
-        .flat_map_iter(
-            |(values, (metric, representation))| match (*metric, *representation) {
+        .enumerate()
+        .flat_map_iter(|(owner, (values, (metric, representation)))| {
+            let entries = match (*metric, *representation) {
                 (CoordinateMetric::Periodic { period }, Representation::Complex) => {
                     vec![complex_deviations(values, period)]
                 }
@@ -327,10 +376,12 @@ pub(crate) fn correlation_log_det(
                     real: center(values, metric),
                     imaginary: None,
                 }],
-            },
-        )
-        .map(Deviations::standardized)
-        .collect();
+            };
+            entries
+                .into_iter()
+                .map(move |entry| (entry.standardized(), owner))
+        })
+        .unzip();
     let frames = columns.first().map_or(0, |column| column.len());
     if frames <= deviations.len() {
         return Err(format!(
@@ -339,7 +390,7 @@ pub(crate) fn correlation_log_det(
             deviations.len()
         ));
     }
-    log_determinant(&correlation_matrix(&deviations))
+    Ok((deviations, owners))
 }
 
 fn mean_square(values: &[f64]) -> f64 {
