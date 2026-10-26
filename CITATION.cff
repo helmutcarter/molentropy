@@ -12,6 +12,9 @@ authors:
     given-names: Helmut
     email: helmut.carter@lehman.cuny.edu
     affiliation: "Lehman College, City University of New York"
+  - family-names: Kurtzman
+    given-names: Tom
+    affiliation: "Lehman College, City University of New York"
 version: 0.1.0
 date-released: "2026-10-26"
 license:

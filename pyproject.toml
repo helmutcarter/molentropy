@@ -8,7 +8,10 @@ description = "Estimate the configurational entropy of a molecule from a molecul
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = { text = "MIT OR Apache-2.0" }
-authors = [{ name = "Helmut Carter", email = "helmut.carter@lehman.cuny.edu" }]
+authors = [
+    { name = "Helmut Carter", email = "helmut.carter@lehman.cuny.edu" },
+    { name = "Tom Kurtzman" },
+]
 dependencies = ["numpy"]
 classifiers = [
     "Programming Language :: Rust",
