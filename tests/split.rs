@@ -171,6 +171,33 @@ fn without_hard_coordinates_it_is_the_soft_entropy() {
 }
 
 #[test]
+fn ring_closure_defeats_the_pairwise_mie_but_not_the_joint_estimate() {
+    // Three torsions tied by a ring-like closure, phi3 = -(phi1 + phi2) +
+    // noise: each pair is independent, so the MIE-2 sees three uniform
+    // torsions, but jointly they lie near a surface. As for cyclohexane with
+    // detected soft torsions.
+    let mut rng = Rng::new(84);
+    let n = 20_000;
+    let noise = 0.2;
+    let phi1 = rng.uniform_vec(n, 0.0, TAU);
+    let phi2 = rng.uniform_vec(n, 0.0, TAU);
+    let phi3: Vec<f64> = phi1
+        .iter()
+        .zip(&phi2)
+        .map(|(a, b)| (-(a + b) + noise * rng.normal()).rem_euclid(TAU))
+        .collect();
+    let data = vec![phi1, phi2, phi3];
+    let metrics = [TORSION; 3];
+    let truth = 2.0 * TAU.ln() + 0.5 * (TAU * E * noise * noise).ln();
+    let mut settings = SplitOptions::new(SoftSelection::Indices(&[0, 1, 2]));
+    let mie = split(&data, &metrics, &settings).total;
+    settings.soft_estimator = SoftEstimator::JointNearestNeighbor;
+    let joint = split(&data, &metrics, &settings).total;
+    assert!((joint - truth).abs() < 0.1, "joint {joint} vs {truth}");
+    assert!(mie - truth > 1.5, "MIE-2 {mie} vs {truth}");
+}
+
+#[test]
 fn for_one_soft_coordinate_the_mie_and_joint_estimates_agree() {
     let mut rng = Rng::new(74);
     let (data, _) = well_system(&mut rng, 3_000);
@@ -219,6 +246,55 @@ fn gaussian_coupling_recovers_a_linear_dependence_on_cos_and_sin() {
         features: SoftFeatures::Complex,
     };
     assert!(split(&data, &metrics, &settings).coupling < 0.0);
+}
+
+#[test]
+fn cos_sin_features_catch_a_trans_gauche_dependence_that_complex_ones_miss() {
+    // A three-well torsion and a hard coordinate whose mean depends only on
+    // trans against gauche, that is on cos(phi), as a bond angle does in a
+    // chain. The single complex entry averages cos and sin, so it misses most
+    // of the dependence; this is why cos/sin is the default.
+    let mut rng = Rng::new(81);
+    let n = 50_000;
+    let wells = [(PI, 0.6, -1.0), (PI / 3.0, 0.2, 0.5), (-PI / 3.0, 0.2, 0.5)];
+    let (width, sd) = (0.2, 0.3);
+    let (mut phi, mut x) = (Vec::new(), Vec::new());
+    for _ in 0..n {
+        let mut pick = rng.uniform();
+        let &(center, _, mean) = wells
+            .iter()
+            .find(|w| {
+                pick -= w.1;
+                pick < 0.0
+            })
+            .unwrap_or(&wells[2]);
+        phi.push((center + width * rng.normal()).rem_euclid(TAU));
+        x.push(mean + sd * rng.normal());
+    }
+    let data = vec![phi, x];
+    let metrics = [TORSION, LINEAR];
+    // H(phi) for well-separated wells, plus H(x | phi) = H(x | well).
+    let truth: f64 = wells
+        .iter()
+        .map(|&(_, p, _)| p * (0.5 * (TAU * E * width * width).ln() - p.ln()))
+        .sum::<f64>()
+        + 0.5 * (TAU * E * sd * sd).ln();
+
+    let total = |coupling| {
+        let mut settings = SplitOptions::new(SoftSelection::Indices(&[0]));
+        settings.coupling = coupling;
+        split(&data, &metrics, &settings).total
+    };
+    let cos_sin = total(Coupling::Gaussian {
+        features: SoftFeatures::CosSin,
+    });
+    let complex = total(Coupling::Gaussian {
+        features: SoftFeatures::Complex,
+    });
+    let independent = total(Coupling::None);
+    assert!((cos_sin - truth).abs() < 0.15, "{cos_sin} vs {truth}");
+    assert!(complex - truth > 0.4, "{complex} vs {truth}");
+    assert!(independent > complex, "{independent} vs {complex}");
 }
 
 #[test]
@@ -277,6 +353,84 @@ fn per_state_coupling_recovers_a_well_dependent_spread() {
     let mut independent = SplitOptions::new(SoftSelection::Indices(&[0]));
     independent.coupling = Coupling::None;
     assert!(split(&data, &metrics, &independent).total > truth + 0.1);
+}
+
+#[test]
+fn per_state_coupling_beats_gaussian_coupling_when_the_spread_depends_on_the_state() {
+    // As for biphenyl: a few well-populated states whose hard coordinate
+    // differs in spread, not in mean, which no second moment of (cos, sin)
+    // can see.
+    let mut rng = Rng::new(82);
+    let (data, _) = well_system(&mut rng, 60_000);
+    let data = vec![data[0].clone(), data[1].clone()];
+    let metrics = [TORSION, LINEAR];
+    let truth = well_system_entropy();
+    let mut settings = SplitOptions::new(SoftSelection::Indices(&[0]));
+    let gaussian = split(&data, &metrics, &settings).total;
+    settings.coupling = Coupling::PerState(StateOptions::default());
+    let per_state = split(&data, &metrics, &settings).total;
+    assert!(
+        (gaussian - truth).abs() > 0.1 && (per_state - truth).abs() < 0.03,
+        "Gaussian {gaussian}, per-state {per_state}, truth {truth}"
+    );
+}
+
+/// `torsions` independent three-well torsions and one hard coordinate.
+fn many_wells(rng: &mut Rng, torsions: usize, n: usize) -> Vec<Vec<f64>> {
+    let mut data: Vec<Vec<f64>> = (0..torsions)
+        .map(|_| {
+            (0..n)
+                .map(|_| {
+                    let well = (3.0 * rng.uniform()).floor();
+                    (well * TAU / 3.0 + 0.2 * rng.normal()).rem_euclid(TAU)
+                })
+                .collect()
+        })
+        .collect();
+    data.push(rng.normal_vec(n, 0.0, 1.0));
+    data
+}
+
+#[test]
+fn per_state_coupling_refuses_too_many_states() {
+    // As for decane and longer chains: three wells per torsion multiply into
+    // more states than the frames can fill.
+    let mut rng = Rng::new(83);
+    let data = many_wells(&mut rng, 5, 6_000);
+    let mut metrics = vec![TORSION; 5];
+    metrics.push(LINEAR);
+    let soft: Vec<usize> = (0..5).collect();
+    let mut settings = SplitOptions::new(SoftSelection::Indices(&soft));
+    settings.coupling = Coupling::PerState(StateOptions::default());
+    let err = estimate_split_entropy(&data, 6_000, &settings, &options(&metrics)).unwrap_err();
+    assert!(
+        err.contains("no conformational state has enough frames"),
+        "{err}"
+    );
+
+    let data = many_wells(&mut rng, 6, 40_000);
+    let mut metrics = vec![TORSION; 6];
+    metrics.push(LINEAR);
+    let soft: Vec<usize> = (0..6).collect();
+    settings.soft = SoftSelection::Indices(&soft);
+    settings.coupling = Coupling::PerState(StateOptions {
+        min_frames: 20,
+        ..Default::default()
+    });
+    let err = estimate_split_entropy(&data, 40_000, &settings, &options(&metrics)).unwrap_err();
+    assert!(err.contains("729 conformational states"), "{err}");
+    assert!(err.contains("maximum of 256"), "{err}");
+
+    // Gaussian coupling has no states to run out of.
+    settings.coupling = Coupling::Gaussian {
+        features: SoftFeatures::CosSin,
+    };
+    assert!(
+        estimate_split_entropy(&data, 40_000, &settings, &options(&metrics))
+            .unwrap()
+            .total
+            .is_finite()
+    );
 }
 
 #[test]
