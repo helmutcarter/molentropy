@@ -243,25 +243,6 @@ fn unsupported_expansion_orders_are_rejected() {
 }
 
 #[test]
-fn per_coordinate_entropy_supports_only_orders_one_and_two() {
-    // The per-coordinate split is defined only through pairwise terms, so orders
-    // 3 and 4 must be refused rather than silently truncated to order 2.
-    let data = vec![
-        vec![0.1, 0.4, 0.8],
-        vec![1.0, 1.3, 1.9],
-        vec![2.0, 2.4, 2.7],
-    ];
-    for order in [0usize, 3, 4] {
-        let error = estimate_coordinate_entropy(&data, 3, order, &EntropyOptions::default())
-            .expect_err(&format!("order {order}: expected rejection"));
-        assert!(
-            error.contains("unsupported per-coordinate MIE order"),
-            "order {order}: unexpected error {error:?}"
-        );
-    }
-}
-
-#[test]
 fn an_order_above_the_coordinate_count_falls_back_to_the_joint_entropy() {
     // With fewer coordinates than the requested order the expansion has nothing
     // left to truncate, so it must clamp to the full joint entropy rather than

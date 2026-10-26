@@ -657,7 +657,7 @@ mod cli {
     use nn_entropy::bat_library::InternalCoordinates;
     use nn_entropy::split::{
         Coupling, LARGE_SOFT_SET, SoftEstimator, SoftFeatures, SoftSelection, SplitOptions,
-        StateDefinition, StateOptions, estimate_split_entropy,
+        StateDefinition, StateOptions, estimate_coordinate_split_entropy, estimate_split_entropy,
     };
 
     /// A chain molecule (three rotatable bonds) with more frames than
@@ -860,6 +860,71 @@ mod cli {
     }
 
     #[test]
+    fn per_coordinate_split_output_matches_the_library() {
+        // The fixture's torsions only jitter about one value, so their higher
+        // harmonics are nearly collinear and the shares' eigendecomposition
+        // refuses them; one harmonic is well conditioned.
+        let (top, traj) = chain("cli_per_coordinate");
+        let output = run(
+            &top,
+            &traj,
+            &[
+                "--estimator",
+                "split",
+                "--per-coordinate",
+                "--soft-features",
+                "cossin",
+            ],
+        );
+        let lines = lines(&output);
+        let header = lines
+            .iter()
+            .position(|l| l == "coordinate\ttype\tatoms\tentropy\tset\town\tcoupling")
+            .expect("per-coordinate header");
+        let mut internal = InternalCoordinates::new(&top).unwrap();
+        internal
+            .calculate_internal_coords(&traj, usize::MAX, false)
+            .unwrap();
+        let data = internal.columns(0, 1).unwrap();
+        let metrics = internal.coordinate_metrics();
+        let soft = internal.soft_torsions();
+        let mut settings = SplitOptions::new(SoftSelection::Indices(&soft));
+        settings.coupling = Coupling::Gaussian {
+            features: SoftFeatures::CosSin,
+        };
+        let expected = estimate_coordinate_split_entropy(
+            &data,
+            data[0].len(),
+            &settings,
+            &EntropyOptions {
+                metrics: Some(&metrics),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for (index, line) in lines[header + 1..header + 1 + data.len()]
+            .iter()
+            .enumerate()
+        {
+            let cells: Vec<&str> = line.split('\t').collect();
+            assert_eq!(cells[0], (index + 1).to_string());
+            let set = if soft.contains(&index) {
+                "soft"
+            } else {
+                "hard"
+            };
+            assert_eq!(cells[4], set);
+            assert_eq!(cells[3].parse::<f64>().unwrap(), expected.total[index]);
+            assert_eq!(cells[5].parse::<f64>().unwrap(), expected.own[index]);
+            assert_eq!(cells[6].parse::<f64>().unwrap(), expected.coupling[index]);
+        }
+        assert_eq!(
+            lines.last().unwrap(),
+            &format!("Total entropy = {}", expected.split.total)
+        );
+    }
+
+    #[test]
     fn soft_and_state_lists_count_from_one() {
         let (top, traj) = chain("cli_lists");
         let lines = lines(&run(
@@ -968,8 +1033,18 @@ mod cli {
                 "apply only to --coupling states",
             ),
             (
-                &["--estimator", "split", "--per-coordinate"][..],
-                "cannot be combined with --estimator split",
+                &["--estimator", "split", "--mutual-information"][..],
+                "--mutual-information applies only to --estimator nn",
+            ),
+            (
+                &[
+                    "--estimator",
+                    "split",
+                    "--soft-estimator",
+                    "joint",
+                    "--per-coordinate",
+                ][..],
+                "the joint soft estimate has no per-coordinate split",
             ),
             (
                 &["--estimator", "split", "--no-phase-angles"][..],

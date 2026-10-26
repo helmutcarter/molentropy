@@ -64,4 +64,4 @@ Each default is the setting with the lowest error on small flexible molecules th
 - **The joint soft estimator** has no truncation error but its bias grows with the number of soft torsions, and it is limited to 8.
 - **Detection** can call a rotatable bond stuck in one well hard, and a stiff torsion that samples two wells soft; the topological rule cannot.
 
-`--per-coordinate` and `--mutual-information` do not apply to the split estimator.
+`--per-coordinate` (`per_coordinate=True` in Python, `estimate_coordinate_split_entropy` in Rust) gives each coordinate's share of the soft or hard entropy and of the coupling, except with the joint soft estimator; see [Per-coordinate entropies](per-coordinate.md#the-split-estimator). `--mutual-information` does not apply to the split estimator.

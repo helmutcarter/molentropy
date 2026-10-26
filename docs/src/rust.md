@@ -32,9 +32,9 @@ let entropy = calculate_entropy(&one_d_data, frames_end, 2, &options)?;
 
 The NN MIE functions all take an `EntropyOptions`, described under [Nearest-neighbor MIE](nn-mie.md#options):
 - `calculate_entropy(data, frames_end, mie_order, &options)` returns the total entropy at MIE order 1, 2, 3 or 4.
-- `estimate_coordinate_entropy(data, frames_end, mie_order, &options)` returns each coordinate's share of the entropy at MIE order 1 or 2, so the values sum to `calculate_entropy` at the same order and with the same options. Order 1 gives the marginal entropies. Order 2 also splits each pairwise mutual information term evenly between its two coordinates. Orders 3 and 4 are rejected.
+- `estimate_coordinate_entropy(data, frames_end, mie_order, &options)` returns each coordinate's share of the entropy at MIE order 1 to 4, so the values sum to `calculate_entropy` at the same order and with the same options. Order 1 gives the marginal entropies; higher orders split each interaction term evenly among its coordinates. See [Per-coordinate entropies](per-coordinate.md).
 - `estimate_coordinate_mutual_information(data, frames_end, &options)` returns the mutual information of each coordinate pair.
-- `estimate_mist_entropy(data, frames_end, &options)` returns the mutual information spanning tree (MIST) entropy; see [NN MIE](nn-mie.md).
+- `estimate_mist_entropy(data, frames_end, &options)` returns the mutual information spanning tree (MIST) entropy; see [NN MIE](nn-mie.md). `estimate_coordinate_mist_entropy` takes the same arguments and returns each coordinate's share.
 - `calc_joint_nn([&x, &y, ...], metrics)` is the underlying nearest-neighbor sum, `sum over frames of ln(nearest-neighbor distance)`, in any number of dimensions; the MIE uses 1 to 4. `calc_joint_nn_with_window(coordinates, metrics, w)` is the same sum with a Theiler window.
 
 To build coordinates from files, use `bat_library::InternalCoordinates`:
@@ -79,4 +79,4 @@ let result = estimate_split_entropy(&data, frames, &split, &options)?;
 println!("{} = {} + {} + {}", result.total, result.soft, result.hard, result.coupling);
 ```
 
-`SoftSelection::Detect` finds soft coordinates from their basins (`basins::detect_basins`), and `estimate_joint_entropy` gives a joint nearest-neighbor estimate over up to 8 coordinates.
+`SoftSelection::Detect` finds soft coordinates from their basins (`basins::detect_basins`), and `estimate_joint_entropy` gives a joint nearest-neighbor estimate over up to 8 coordinates. `estimate_coordinate_split_entropy` takes the same arguments and returns each coordinate's `own` and `coupling` shares and their `total`, with the `split` they divide.

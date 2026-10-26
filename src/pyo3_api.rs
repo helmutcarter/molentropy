@@ -11,7 +11,8 @@ use crate::quasi_harmonic::{MarginalEstimator, PeriodicCorrelation, QuasiHarmoni
 use crate::split::{
     Coupling, DEFAULT_HARMONICS, HardEstimator, LARGE_SOFT_SET, SoftEstimator, SoftFeatures,
     SoftSelection, SplitEntropy, SplitOptions, StateDefinition, StateOptions,
-    estimate_split_entropy as split_impl, large_soft_set_warning,
+    estimate_coordinate_split_entropy, estimate_split_entropy as split_impl,
+    large_soft_set_warning,
 };
 use crate::{CoordinateMetric, EntropyOptions, FiniteSampleConstant};
 use numpy::PyReadonlyArray2;
@@ -327,6 +328,7 @@ impl SplitArguments {
 
     /// The split entropy of `data`. `topology` is a System's soft torsions and
     /// symmetric rotors; None for an array.
+    #[allow(clippy::too_many_arguments)]
     fn estimate(
         &self,
         data: &[Vec<f64>],
@@ -335,7 +337,8 @@ impl SplitArguments {
         topology: Option<(&[usize], &[usize])>,
         exact_constant: bool,
         theiler_window: usize,
-    ) -> PyResult<SplitEntropy> {
+        per_coordinate: bool,
+    ) -> PyResult<(SplitEntropy, Option<CoordinateShares>)> {
         let selection = match (&self.soft, topology) {
             (SoftArgument::List(list), _) => SoftSelection::Indices(list),
             (SoftArgument::Detect, _) | (SoftArgument::Default, None) => {
@@ -376,18 +379,27 @@ impl SplitArguments {
                 ..Default::default()
             }),
         };
-        split_impl(
-            data,
-            frames,
-            &split,
-            &entropy_options(metrics, exact_constant, theiler_window),
-        )
+        let options = entropy_options(metrics, exact_constant, theiler_window);
+        if per_coordinate {
+            estimate_coordinate_split_entropy(data, frames, &split, &options).map(|shares| {
+                let parts = (shares.total, shares.own, shares.coupling);
+                (shares.split, Some(parts))
+            })
+        } else {
+            split_impl(data, frames, &split, &options).map(|result| (result, None))
+        }
         .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 }
 
 /// `SplitEntropy` as a dict.
-fn split_to_dict(py: Python<'_>, result: SplitEntropy) -> PyResult<PyObject> {
+/// Each coordinate's total, own and coupling shares of a split entropy.
+type CoordinateShares = (Vec<f64>, Vec<f64>, Vec<f64>);
+
+fn split_to_dict(
+    py: Python<'_>,
+    (result, shares): (SplitEntropy, Option<CoordinateShares>),
+) -> PyResult<PyObject> {
     if result.soft_coordinates.len() > LARGE_SOFT_SET {
         PyErr::warn_bound(
             py,
@@ -426,6 +438,13 @@ fn split_to_dict(py: Python<'_>, result: SplitEntropy) -> PyResult<PyObject> {
             states.set_item("states", list)?;
             dict.set_item("states", states)?;
         }
+    }
+    if let Some((total, own, coupling)) = shares {
+        let coordinates = PyDict::new_bound(py);
+        coordinates.set_item("total", total)?;
+        coordinates.set_item("own", own)?;
+        coordinates.set_item("coupling", coupling)?;
+        dict.set_item("coordinates", coordinates)?;
     }
     Ok(dict.into_py(py))
 }
@@ -663,7 +682,7 @@ impl System {
     /// Split entropy; see the module function of the same name. `soft=None`
     /// uses the System's soft torsions.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="harmonics", harmonics=None, state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periodic=true, exact_constant=false, theiler_window=0))]
+    #[pyo3(signature = (soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="harmonics", harmonics=None, state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periodic=true, exact_constant=false, theiler_window=0, per_coordinate=false))]
     fn estimate_split_entropy(
         &self,
         py: Python<'_>,
@@ -682,6 +701,7 @@ impl System {
         periodic: bool,
         exact_constant: bool,
         theiler_window: usize,
+        per_coordinate: bool,
     ) -> PyResult<PyObject> {
         let arguments = SplitArguments::new(
             soft,
@@ -706,6 +726,7 @@ impl System {
                 Some((&self.soft_torsions, &self.symmetric_rotor_torsions)),
                 exact_constant,
                 theiler_window,
+                per_coordinate,
             )
         })?;
         split_to_dict(py, result)
@@ -906,7 +927,7 @@ fn estimate_coordinate_quasi_harmonic_entropy(
 /// "detect", or a list of coordinate indices from 0; None means "topology"
 /// for a System and "detect" for an array.
 #[allow(clippy::too_many_arguments)]
-#[pyfunction(signature = (data, soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="harmonics", harmonics=None, state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periods=None, periodic=true, exact_constant=false, theiler_window=0))]
+#[pyfunction(signature = (data, soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="harmonics", harmonics=None, state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periods=None, periodic=true, exact_constant=false, theiler_window=0, per_coordinate=false))]
 fn estimate_split_entropy(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
@@ -926,6 +947,7 @@ fn estimate_split_entropy(
     periodic: bool,
     exact_constant: bool,
     theiler_window: usize,
+    per_coordinate: bool,
 ) -> PyResult<PyObject> {
     if let Ok(system) = data.extract::<PyRef<'_, System>>() {
         if periods.is_some() {
@@ -950,6 +972,7 @@ fn estimate_split_entropy(
             periodic,
             exact_constant,
             theiler_window,
+            per_coordinate,
         );
     }
     let arguments = SplitArguments::new(
@@ -975,6 +998,7 @@ fn estimate_split_entropy(
             None,
             exact_constant,
             theiler_window,
+            per_coordinate,
         )
     })?;
     split_to_dict(py, result)

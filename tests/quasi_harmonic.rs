@@ -1026,23 +1026,17 @@ mod cli {
     }
 
     #[test]
-    fn per_coordinate_rejects_what_it_cannot_split() {
+    fn per_coordinate_rejects_legacy_mode() {
+        // Every other estimator but the joint soft estimate has shares; see
+        // tests/per_coordinate.rs and the split CLI tests.
         let (top, traj) = chain_system("cli_per_coordinate_rejected");
-        for (args, message) in [
-            (
-                &["--per-coordinate", "--mie-order", "3"][..],
-                "--mie-order 1 or 2",
-            ),
-            (
-                &["--per-coordinate", "--legacy"][..],
-                "--per-coordinate cannot be combined",
-            ),
-        ] {
-            let output = run(&top, &traj, args);
-            assert!(!output.status.success(), "{args:?} should fail");
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(stderr.contains(message), "{args:?}: {stderr}");
-        }
+        let output = run(&top, &traj, &["--per-coordinate", "--legacy"]);
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("--per-coordinate cannot be combined"),
+            "{stderr}"
+        );
     }
 
     /// The value of the `name = value` line of the output.
