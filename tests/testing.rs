@@ -1,8 +1,8 @@
 use assert_approx_eq::assert_approx_eq;
-use nn_entropy::bat_library::geometry::{
+use molentropy::bat_library::geometry::{
     bond_angle, bond_length, internal_coordinates, torsion_angle,
 };
-use nn_entropy::*;
+use molentropy::*;
 
 fn kl_constant(n_frames: usize, dimensions: usize) -> f64 {
     let volume = match dimensions {

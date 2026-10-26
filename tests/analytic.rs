@@ -18,7 +18,7 @@ use common::{
     Rng, bivariate_normal_entropy, bivariate_normal_mutual_information, exponential_entropy,
     normal_entropy, uniform_entropy,
 };
-use nn_entropy::{
+use molentropy::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_mutual_information,
     estimate_mist_entropy,
 };

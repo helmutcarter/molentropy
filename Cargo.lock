@@ -271,6 +271,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "molentropy"
+version = "0.1.0"
+dependencies = [
+ "assert_approx_eq",
+ "kiddo",
+ "nalgebra",
+ "numpy",
+ "pyo3",
+ "rayon",
+]
+
+[[package]]
 name = "nalgebra"
 version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -312,18 +324,6 @@ dependencies = [
  "num-integer",
  "num-traits",
  "rawpointer",
-]
-
-[[package]]
-name = "nn_entropy"
-version = "0.2.0"
-dependencies = [
- "assert_approx_eq",
- "kiddo",
- "nalgebra",
- "numpy",
- "pyo3",
- "rayon",
 ]
 
 [[package]]

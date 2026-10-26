@@ -9,8 +9,8 @@ use common::amber::{
     write_netcdf, write_prmtop,
 };
 
-use nn_entropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
-use nn_entropy::{
+use molentropy::bat_library::{BondSet, CoordinateOptions, InternalCoordinates};
+use molentropy::{
     CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy,
     estimate_coordinate_mutual_information,
 };
@@ -33,7 +33,7 @@ fn parse_entropy(stdout: &[u8]) -> f64 {
 fn no_periodic_matches_linear_raw_array_estimator() {
     let top = fixture("tests/fixtures/test.parm7");
     let traj = fixture("tests/fixtures/test.nc");
-    let output = Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+    let output = Command::new(env!("CARGO_BIN_EXE_molentropy"))
         .args([
             top.to_str().unwrap(),
             traj.to_str().unwrap(),
@@ -66,11 +66,11 @@ fn no_periodic_matches_linear_raw_array_estimator() {
 fn periodic_remains_the_default() {
     let top = fixture("tests/fixtures/test.parm7");
     let traj = fixture("tests/fixtures/test.nc");
-    let periodic = Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+    let periodic = Command::new(env!("CARGO_BIN_EXE_molentropy"))
         .args([top.to_str().unwrap(), traj.to_str().unwrap()])
         .output()
         .unwrap();
-    let linear = Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+    let linear = Command::new(env!("CARGO_BIN_EXE_molentropy"))
         .args([
             top.to_str().unwrap(),
             traj.to_str().unwrap(),
@@ -86,7 +86,7 @@ fn periodic_remains_the_default() {
 fn exact_constant_flag_selects_exact_finite_sample_term() {
     let top = fixture("tests/fixtures/test.parm7");
     let traj = fixture("tests/fixtures/test.nc");
-    let output = Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+    let output = Command::new(env!("CARGO_BIN_EXE_molentropy"))
         .args([
             top.to_str().unwrap(),
             traj.to_str().unwrap(),
@@ -132,7 +132,7 @@ fn run_cli(extra: &[&str]) -> std::process::Output {
         traj.to_str().unwrap().to_string(),
     ];
     args.extend(extra.iter().map(|arg| arg.to_string()));
-    Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+    Command::new(env!("CARGO_BIN_EXE_molentropy"))
         .args(args)
         .output()
         .expect("failed to run CLI")
@@ -305,7 +305,7 @@ fn phase_angles_are_the_default() {
 /// Runs the CLI with exactly `args` and checks that it fails cleanly: exit
 /// status 1, `message` on stderr, and no panic.
 fn assert_fails(args: &[&str], message: &str) {
-    let output = Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+    let output = Command::new(env!("CARGO_BIN_EXE_molentropy"))
         .args(args)
         .output()
         .expect("failed to run CLI");
@@ -414,7 +414,7 @@ fn a_system_without_internal_coordinates_is_reported() {
 
 #[test]
 fn documented_usage_matches_the_program() {
-    let output = Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+    let output = Command::new(env!("CARGO_BIN_EXE_molentropy"))
         .output()
         .expect("failed to run CLI");
     let usage = String::from_utf8_lossy(&output.stderr);

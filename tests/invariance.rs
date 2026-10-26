@@ -13,7 +13,7 @@
 mod common;
 
 use common::Rng;
-use nn_entropy::{
+use molentropy::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_mutual_information,
 };
 

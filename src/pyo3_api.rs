@@ -1,7 +1,7 @@
-//! The `nn_entropy` Python extension module, built with maturin.
+//! The `molentropy` Python extension module, built with maturin.
 //!
 //! Its functions are called from Python, not from Rust; the user guide
-//! documents the Python API: <https://helmutcarter.github.io/nn-entropy/python.html>. Every function wraps an estimator of this crate and releases
+//! documents the Python API: <https://helmutcarter.github.io/molentropy/python.html>. Every function wraps an estimator of this crate and releases
 //! the GIL while it runs.
 
 #![allow(unsafe_op_in_unsafe_fn)]
@@ -1040,7 +1040,7 @@ fn detect_basins(
 }
 
 #[pymodule]
-fn nn_entropy(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn molentropy(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<System>()?;
     m.add_function(wrap_pyfunction!(load_system, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_entropy, m)?)?;

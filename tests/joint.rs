@@ -8,7 +8,7 @@
 mod common;
 
 use common::{Rng, brute_force_log_nn_sum, brute_force_log_nn_sum_windowed, unit_ball_volume};
-use nn_entropy::{
+use molentropy::{
     CoordinateMetric, EntropyOptions, FiniteSampleConstant, MAX_JOINT_DIMENSION,
     calc_joint_nn_dynamic, calc_joint_nn_with_window, calculate_entropy, estimate_joint_entropy,
     log_unit_ball_volume,

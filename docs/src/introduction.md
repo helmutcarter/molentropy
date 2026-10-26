@@ -1,6 +1,6 @@
-# nn-entropy
+# molentropy
 
-nn-entropy estimates the configurational entropy of a molecule from a molecular dynamics trajectory. It reads Amber topologies (`.parm7`) and NetCDF trajectories (`.nc`), converts every frame to internal coordinates (bond lengths, bond angles and torsions), and estimates the entropy of those coordinates. The same estimators are available from the [command line](cli.md), from [Python](python.md) and as a [Rust library](rust.md).
+molentropy estimates the configurational entropy of a molecule from a molecular dynamics trajectory. It reads Amber topologies (`.parm7`) and NetCDF trajectories (`.nc`), converts every frame to internal coordinates (bond lengths, bond angles and torsions), and estimates the entropy of those coordinates. The same estimators are available from the [command line](cli.md), from [Python](python.md) and as a [Rust library](rust.md).
 
 ## Choosing an estimator
 

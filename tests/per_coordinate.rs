@@ -8,12 +8,12 @@ mod common;
 use std::f64::consts::TAU;
 
 use common::Rng;
-use nn_entropy::quasi_harmonic::{PeriodicCorrelation, QuasiHarmonicOptions};
-use nn_entropy::split::{
+use molentropy::quasi_harmonic::{PeriodicCorrelation, QuasiHarmonicOptions};
+use molentropy::split::{
     Coupling, HardEstimator, SoftEstimator, SoftFeatures, SoftSelection, SplitOptions,
     StateDefinition, StateOptions, estimate_coordinate_split_entropy, estimate_split_entropy,
 };
-use nn_entropy::{
+use molentropy::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_entropy,
     estimate_coordinate_mist_entropy, estimate_coordinate_mutual_information,
     estimate_joint_entropy, estimate_mist_entropy,

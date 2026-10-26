@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use std::f64::consts::{PI, TAU};
 
 use common::Rng;
-use nn_entropy::CoordinateMetric;
-use nn_entropy::basins::{BasinOptions, Basins, detect_basins};
+use molentropy::CoordinateMetric;
+use molentropy::basins::{BasinOptions, Basins, detect_basins};
 
 const TORSION: CoordinateMetric = CoordinateMetric::Periodic { period: TAU };
 

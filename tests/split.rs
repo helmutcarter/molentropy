@@ -10,14 +10,14 @@ mod common;
 use std::f64::consts::{E, PI, TAU};
 
 use common::Rng;
-use nn_entropy::quasi_harmonic::{
+use molentropy::quasi_harmonic::{
     PeriodicCorrelation, QuasiHarmonicOptions, estimate_quasi_harmonic_entropy,
 };
-use nn_entropy::split::{
+use molentropy::split::{
     Coupling, DEFAULT_HARMONICS, HardEstimator, SoftEstimator, SoftFeatures, SoftSelection,
     SplitOptions, StateDefinition, StateOptions, estimate_split_entropy,
 };
-use nn_entropy::{
+use molentropy::{
     CoordinateMetric, EntropyOptions, MAX_JOINT_DIMENSION, calculate_entropy,
     estimate_joint_entropy, estimate_mist_entropy,
 };
@@ -80,7 +80,7 @@ fn split(
     data: &[Vec<f64>],
     metrics: &[CoordinateMetric],
     split: &SplitOptions,
-) -> nn_entropy::split::SplitEntropy {
+) -> molentropy::split::SplitEntropy {
     estimate_split_entropy(data, data[0].len(), split, &options(metrics)).unwrap()
 }
 
@@ -653,9 +653,9 @@ mod cli {
         CHAIN_ATOMS, CHAIN_BONDS, NetcdfOptions, Topology, chain_frames, concat_frames,
         scratch_path, write_netcdf, write_prmtop,
     };
-    use nn_entropy::EntropyOptions;
-    use nn_entropy::bat_library::InternalCoordinates;
-    use nn_entropy::split::{
+    use molentropy::EntropyOptions;
+    use molentropy::bat_library::InternalCoordinates;
+    use molentropy::split::{
         Coupling, LARGE_SOFT_SET, SoftEstimator, SoftFeatures, SoftSelection, SplitOptions,
         StateDefinition, StateOptions, estimate_coordinate_split_entropy, estimate_split_entropy,
     };
@@ -675,7 +675,7 @@ mod cli {
     }
 
     fn run(top: &Path, traj: &Path, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+        Command::new(env!("CARGO_BIN_EXE_molentropy"))
             .args([top.to_str().unwrap(), traj.to_str().unwrap()])
             .args(args)
             .output()
@@ -706,7 +706,7 @@ mod cli {
         top: &Path,
         traj: &Path,
         configure: impl Fn(&mut SplitOptions, &InternalCoordinates),
-    ) -> nn_entropy::split::SplitEntropy {
+    ) -> molentropy::split::SplitEntropy {
         let mut internal = InternalCoordinates::new(top).unwrap();
         internal
             .calculate_internal_coords(traj, usize::MAX, false)

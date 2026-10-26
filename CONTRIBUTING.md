@@ -38,7 +38,7 @@ separate smoke test that runs against a built wheel:
 
 ```bash
 maturin build --out dist
-pip install --no-index --find-links dist nn_entropy
+pip install --no-index --find-links dist molentropy
 python tests/python_smoke.py
 ```
 
@@ -60,6 +60,16 @@ smoke test that does runs outside `cargo`.
 ## Documentation
 
 The user guide lives in `docs/` as an mdBook. Build it with `mdbook build docs` (CI uses mdBook 0.4.52) or preview it with `mdbook serve docs`. `.github/workflows/pages.yml` publishes it on every push to main. Public Rust items must have doc comments: `#![warn(missing_docs)]` together with clippy's `-D warnings` enforces it, and CI builds the API docs with `RUSTDOCFLAGS=-D warnings`.
+
+## Releases
+
+Versions follow [semantic versioning](https://semver.org/); before 1.0, a minor version may change the API or the default estimates. To release version X.Y.Z:
+
+1. On a branch, set `version` in `Cargo.toml` (then run `cargo check` to update `Cargo.lock`), and `version` and `date-released` in `CITATION.cff`.
+2. Move the changes under a new `## [X.Y.Z] - YYYY-MM-DD` heading in `CHANGELOG.md`, with its link at the bottom.
+3. Merge, then tag main and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+`.github/workflows/release.yml` checks that the tag, `Cargo.toml`, `CITATION.cff` and `CHANGELOG.md` agree, builds and smoke-tests the wheels on Linux, macOS and Windows, and publishes a GitHub release with the wheels attached and the changelog section as notes. Zenodo archives the release and mints its DOI. Pull requests that change the packaging run the same build without releasing.
 
 ## Project layout
 - `src/lib.rs`: the nearest-neighbor estimators, the MIE, and the nearest-neighbor search; also the crate documentation.

@@ -1,5 +1,5 @@
 //! Reproduces the butane end-state comparison in the user guide,
-//! <https://helmutcarter.github.io/nn-entropy/validation.html>.
+//! <https://helmutcarter.github.io/molentropy/validation.html>.
 //!
 //! ```text
 //! cargo run --release --example butane_validation -- <dir> <reference> [<dir> <reference> ...]
@@ -12,15 +12,15 @@
 
 use std::path::Path;
 
-use nn_entropy::bat_library::{CoordinateOptions, InternalCoordinates};
-use nn_entropy::quasi_harmonic::{
+use molentropy::bat_library::{CoordinateOptions, InternalCoordinates};
+use molentropy::quasi_harmonic::{
     MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions, estimate_quasi_harmonic_entropy,
 };
-use nn_entropy::split::{
+use molentropy::split::{
     Coupling, HardEstimator, SoftEstimator, SoftFeatures, SoftSelection, SplitOptions,
     StateDefinition, StateOptions, estimate_split_entropy,
 };
-use nn_entropy::{CoordinateMetric, EntropyOptions, calculate_entropy};
+use molentropy::{CoordinateMetric, EntropyOptions, calculate_entropy};
 
 type Error = Box<dyn std::error::Error>;
 

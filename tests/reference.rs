@@ -11,7 +11,7 @@ use common::{
     Rng, brute_force_joint_entropy, brute_force_log_nn_sum, choose, combinations,
     kl_constant_asymptotic,
 };
-use nn_entropy::{CoordinateMetric, EntropyOptions, calc_joint_nn, calculate_entropy};
+use molentropy::{CoordinateMetric, EntropyOptions, calc_joint_nn, calculate_entropy};
 
 const PERIOD: f64 = std::f64::consts::TAU;
 

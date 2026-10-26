@@ -5,7 +5,7 @@
 //! It reads Amber topologies and NetCDF trajectories, converts them to
 //! internal coordinates, and offers several estimators that work on any array
 //! of sampled coordinates. A command-line program and Python bindings expose
-//! the same estimators; the [user guide](https://helmutcarter.github.io/nn-entropy/) documents them and the
+//! the same estimators; the [user guide](https://helmutcarter.github.io/molentropy/) documents them and the
 //! methods.
 //!
 //! # Choosing an estimator
@@ -14,7 +14,7 @@
 //!   [`quasi_harmonic::estimate_quasi_harmonic_entropy`]: each coordinate's own
 //!   entropy from its actual distribution, plus a Gaussian correlation term.
 //!   The most accurate estimator in the crate on the systems tested so far; see
-//!   the [validation results](https://helmutcarter.github.io/nn-entropy/validation.html).
+//!   the [validation results](https://helmutcarter.github.io/molentropy/validation.html).
 //! - **Nearest-neighbor mutual information expansion (NN MIE)**,
 //!   [`calculate_entropy`]: nearest-neighbor entropies of single coordinates
 //!   and of pairs (up to sets of four), combined by a truncated expansion.
@@ -46,9 +46,9 @@
 //! ```no_run
 //! use std::path::Path;
 //!
-//! use nn_entropy::EntropyOptions;
-//! use nn_entropy::bat_library::InternalCoordinates;
-//! use nn_entropy::quasi_harmonic::{QuasiHarmonicOptions, estimate_quasi_harmonic_entropy};
+//! use molentropy::EntropyOptions;
+//! use molentropy::bat_library::InternalCoordinates;
+//! use molentropy::quasi_harmonic::{QuasiHarmonicOptions, estimate_quasi_harmonic_entropy};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Heavy-atom bonds, angles, and torsions with phase angles: the defaults.
@@ -77,7 +77,7 @@
 //! Any coordinates work, one `Vec<f64>` per coordinate:
 //!
 //! ```
-//! use nn_entropy::{CoordinateMetric, EntropyOptions, calculate_entropy};
+//! use molentropy::{CoordinateMetric, EntropyOptions, calculate_entropy};
 //!
 //! // An angle sweeping the circle and a coordinate that follows it.
 //! let phi: Vec<f64> = (0..2000).map(|i| (i as f64 * 2.399963).rem_euclid(std::f64::consts::TAU)).collect();

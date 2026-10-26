@@ -18,12 +18,12 @@ use common::amber::{
     TIP4PEW_ATOMS, TIP4PEW_BONDS, Topology, WATER_BONDS, chain_frames, concat_frames, ion_frames,
     scratch_path, water_frames, write_netcdf, write_netcdf_f64, write_prmtop, write_prmtop_with,
 };
-use nn_entropy::CoordinateMetric;
-use nn_entropy::bat_library::geometry::bond_length;
-use nn_entropy::bat_library::geometry::{
+use molentropy::CoordinateMetric;
+use molentropy::bat_library::geometry::bond_length;
+use molentropy::bat_library::geometry::{
     bond_angle, legacy_bond_angle, legacy_torsion_angle, torsion_angle,
 };
-use nn_entropy::bat_library::{CoordinateOptions, Geometry, InternalCoordinates};
+use molentropy::bat_library::{CoordinateOptions, Geometry, InternalCoordinates};
 
 const FRAMES: usize = 12;
 

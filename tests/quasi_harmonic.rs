@@ -9,12 +9,12 @@ mod common;
 use std::f64::consts::{E, PI, TAU};
 
 use common::{Rng, bivariate_normal_entropy, normal_entropy};
-use nn_entropy::quasi_harmonic::{
+use molentropy::quasi_harmonic::{
     CoordinateQuasiHarmonicEntropy, MarginalEstimator, PeriodicCorrelation, QuasiHarmonicEntropy,
     QuasiHarmonicOptions, estimate_coordinate_quasi_harmonic_entropy,
     estimate_quasi_harmonic_entropy,
 };
-use nn_entropy::{CoordinateMetric, EntropyOptions, estimate_coordinate_entropy};
+use molentropy::{CoordinateMetric, EntropyOptions, estimate_coordinate_entropy};
 
 fn estimate(data: &[Vec<f64>], marginals: MarginalEstimator) -> QuasiHarmonicEntropy {
     let options = QuasiHarmonicOptions {
@@ -790,9 +790,9 @@ mod cli {
         CHAIN_ATOMS, CHAIN_BONDS, NetcdfOptions, Topology, chain_frames, concat_frames,
         scratch_path, write_netcdf, write_prmtop,
     };
-    use nn_entropy::EntropyOptions;
-    use nn_entropy::bat_library::InternalCoordinates;
-    use nn_entropy::quasi_harmonic::{
+    use molentropy::EntropyOptions;
+    use molentropy::bat_library::InternalCoordinates;
+    use molentropy::quasi_harmonic::{
         MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions,
         estimate_quasi_harmonic_entropy,
     };
@@ -811,7 +811,7 @@ mod cli {
     }
 
     fn run(top: &Path, traj: &Path, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_nn_entropy"))
+        Command::new(env!("CARGO_BIN_EXE_molentropy"))
             .args([top.to_str().unwrap(), traj.to_str().unwrap()])
             .args(args)
             .output()

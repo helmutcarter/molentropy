@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: molentropy
+abstract: >-
+  Estimates the configurational entropy of a molecule from a molecular dynamics
+  trajectory in internal coordinates, with nearest-neighbor mutual information
+  expansion, mutual information spanning tree, quasi-harmonic, Boltzmann
+  quasi-harmonic and split soft/hard estimators.
+authors:
+  - family-names: Carter
+    given-names: Helmut
+    email: helmut.carter@lehman.cuny.edu
+    affiliation: "Lehman College, City University of New York"
+version: 0.1.0
+date-released: "2026-10-26"
+license:
+  - MIT
+  - Apache-2.0
+repository-code: "https://github.com/helmutcarter/molentropy"
+url: "https://helmutcarter.github.io/molentropy/"
+keywords:
+  - entropy
+  - molecular dynamics
+  - mutual information
+  - quasi-harmonic analysis

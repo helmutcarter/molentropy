@@ -2,7 +2,7 @@
 
 ## Functions
 
-The `nn_entropy` module provides:
+The `molentropy` module provides:
 - `load_system(top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None, tree_bonds=False, phase_angles=True)`. See [Coordinates](coordinates.md).
 - `estimate_entropy(data_or_system, mie_order=None, periods=None, periodic=True, exact_constant=False, theiler_window=0)`. `mie_order` defaults to 2; `mie_order=1` gives the sum of the marginal entropies.
 - `estimate_coordinate_entropy(data_or_system, mie_order=None, periods=None, periodic=True, exact_constant=False, theiler_window=0)`. Returns each coordinate's share of the entropy; `mie_order` defaults to 2. The values sum to `estimate_entropy` at the same order. See [Per-coordinate entropies](per-coordinate.md).
@@ -22,11 +22,11 @@ For a raw array, `periods` is a sequence with one entry per coordinate. Use `Non
 
 
 ```python
-import nn_entropy
+import molentropy
 
-system = nn_entropy.load_system("system.parm7", "trajectory.nc")
+system = molentropy.load_system("system.parm7", "trajectory.nc")
 bqh = system.estimate_quasi_harmonic_entropy()["boltzmann_quasi_harmonic"]
-entropy = nn_entropy.estimate_entropy(system, mie_order=2)  # NN MIE
+entropy = molentropy.estimate_entropy(system, mie_order=2)  # NN MIE
 
 coordinate_entropy = system.estimate_coordinate_entropy()  # order 2, sums to `entropy`
 marginal_entropy = system.estimate_coordinate_entropy(mie_order=1)
@@ -36,5 +36,5 @@ See [Installation](installation.md) for building the module.
 
 ## Threads
 
-- The Python wrappers release the GIL while loading trajectories and running entropy calculations, so multiple Python threads can call into `nn_entropy` concurrently.
+- The Python wrappers release the GIL while loading trajectories and running entropy calculations, so multiple Python threads can call into `molentropy` concurrently.
 - Internal parallelism is handled in Rust with Rayon. Set `RAYON_NUM_THREADS=N` if you want to cap or tune the Rust worker pool.

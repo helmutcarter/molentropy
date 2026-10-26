@@ -1,11 +1,19 @@
 [package]
-name = "nn_entropy"
-version = "0.2.0"
+name = "molentropy"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.94"
+description = "Estimate the configurational entropy of a molecule from a molecular dynamics trajectory."
+authors = ["Helmut Carter <helmut.carter@lehman.cuny.edu>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/helmutcarter/molentropy"
+documentation = "https://helmutcarter.github.io/molentropy/"
+readme = "README.md"
+keywords = ["entropy", "molecular-dynamics", "chemistry", "mutual-information"]
+categories = ["science"]
 
 [lib]
-name = "nn_entropy"
+name = "molentropy"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]

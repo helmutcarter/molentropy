@@ -32,7 +32,7 @@ No mixing term is added: the entropy of moving between states is already part of
 
 ## Basin detection
 
-`detect_basins` (Rust `basins::detect_basins`, Python `nn_entropy.detect_basins`) finds the basins of a periodic coordinate:
+`detect_basins` (Rust `basins::detect_basins`, Python `molentropy.detect_basins`) finds the basins of a periodic coordinate:
 
 1. Histogram the values over one period (72 bins, fewer for small samples) and smooth with a wrapped Gaussian (standard deviation 2 bins).
 2. Take every circular local maximum as a peak.
