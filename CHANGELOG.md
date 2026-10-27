@@ -4,6 +4,18 @@ All notable changes to molentropy are recorded here. Versions follow
 [semantic versioning](https://semver.org/); before 1.0, a minor version may
 change the API or the default estimates.
 
+## [0.1.1] - 2026-10-26
+
+### Changed
+
+- Python: `System.data` is renamed `System.internal_coordinates`.
+
+### Documentation
+
+- When to use tree bonds: with constrained X-H bonds they made every estimator
+  worse on the validation set, so the Coordinates page recommends the default
+  heavy-atom bonds for constrained trajectories.
+
 ## [0.1.0] - 2026-10-26
 
 First release, under the name molentropy (previously nn-entropy).
@@ -28,4 +40,5 @@ First release, under the name molentropy (previously nn-entropy).
 - Validation against HREX/MBAR reference entropies of small molecules and
   peptides at 300 K.
 
+[0.1.1]: https://github.com/helmutcarter/molentropy/releases/tag/v0.1.1
 [0.1.0]: https://github.com/helmutcarter/molentropy/releases/tag/v0.1.0
