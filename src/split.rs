@@ -38,14 +38,15 @@ use crate::{
 
 /// Above this many soft coordinates the front ends warn that the split
 /// estimator is outside its validated range. It was accurate to about 1 nat
-/// with up to 15 soft torsions (hexadecane), but folded peptides with 40 to
-/// 50 were off by tens of nats, where plain BQH did better.
+/// with up to 15 soft torsions (hexadecane), but on folded peptides with 50
+/// to 99 the default was off by tens of nats or unstable across strides, and
+/// MIST and BQH, though stable, were off by up to 5-10% of the entropy change.
 pub const LARGE_SOFT_SET: usize = 20;
 
 /// The front ends' warning for a soft set larger than [`LARGE_SOFT_SET`].
 pub fn large_soft_set_warning(soft: usize) -> String {
     format!(
-        "{soft} soft coordinates, more than the {LARGE_SOFT_SET} the split estimator was validated for; for folded or compact molecules, compare with BQH"
+        "{soft} soft coordinates, more than the {LARGE_SOFT_SET} the split estimator was validated for; for folded or compact molecules, compare with MIST and BQH, and check the result on every 2nd and 4th frame"
     )
 }
 
