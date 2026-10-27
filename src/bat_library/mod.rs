@@ -803,7 +803,9 @@ pub enum Geometry {
     /// normalized dot product, which differs by about 1e-8 rad and can give
     /// NaN for a straight angle, and torsions with NumPy's `pow(x, 0.5)` in
     /// place of `sqrt(x)`. See [`geometry::legacy_bond_angle`] and
-    /// [`geometry::legacy_torsion_angle`].
+    /// [`geometry::legacy_torsion_angle`]. A developer tool for comparison
+    /// with historical results, hidden from the documentation.
+    #[doc(hidden)]
     Legacy,
 }
 
@@ -1057,7 +1059,7 @@ impl InternalCoordinates {
     /// torsions alone.
     ///
     /// The trajectory must have exactly as many atoms as the topology. Phase
-    /// angles and the legacy geometry are applied here, so calling this again
+    /// angles and the chosen geometry are applied here, so calling this again
     /// recomputes everything from the positions.
     pub fn calculate_internal_coords(
         &mut self,

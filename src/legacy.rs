@@ -10,8 +10,10 @@
 //! - the per-coordinate and per-pair entropies are summed in order with
 //!   Python's built-in `sum`, which is compensated from Python 3.12 on.
 //!
-//! Only the linear metric changes the result by more than rounding; see
-//! <https://helmutcarter.github.io/molentropy/legacy.html>.
+//! Only the linear metric changes the result by more than rounding.
+//!
+//! This is a developer tool for comparison with historical results, hidden
+//! from the API documentation and reached from the CLI through `--legacy`.
 
 use crate::{CoordinateMetric, EntropyOptions, binomial, calc_joint_nn, combination_from_rank};
 use rayon::prelude::*;

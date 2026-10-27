@@ -121,6 +121,7 @@ fn torsion_angle_f32_with(
 /// Angle a1-a2-a3 by the acos formula of the original Python implementation,
 /// acos(v1 . v2 / (|v1| |v2|)). Returns NaN when rounding pushes the ratio
 /// outside [-1, 1], which can happen for a straight angle; see [`bond_angle`].
+#[doc(hidden)]
 pub fn legacy_bond_angle(a1: [f64; 3], a2: [f64; 3], a3: [f64; 3]) -> f64 {
     let v1 = [a1[0] - a2[0], a1[1] - a2[1], a1[2] - a2[2]];
     let v2 = [a3[0] - a2[0], a3[1] - a2[1], a3[2] - a2[2]];
@@ -154,6 +155,7 @@ fn legacy_root(x: f64) -> f64 {
 
 /// Torsion a1-a2-a3-a4 as the original Python implementation computed it:
 /// [`torsion_angle`] with |b2| taken as `pow(|b2|^2, 0.5)`.
+#[doc(hidden)]
 pub fn legacy_torsion_angle(a1: [f64; 3], a2: [f64; 3], a3: [f64; 3], a4: [f64; 3]) -> f64 {
     torsion_angle_with(a1, a2, a3, a4, legacy_root)
 }

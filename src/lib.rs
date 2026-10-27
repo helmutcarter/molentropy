@@ -31,8 +31,6 @@
 //! - **Quasi-harmonic (QH)**, the same function as BQH: a Gaussian fit to
 //!   every coordinate. Fast, but overestimates the entropy of multiwell
 //!   torsions.
-//! - [`legacy::legacy_entropy`] reproduces the original Python implementation
-//!   bit for bit and exists only for comparison with historical results.
 //!
 //! Every estimator returns a differential entropy in natural-log units
 //! (units of k_B). That is the entropy of the coordinates as sampled: it does
@@ -103,7 +101,6 @@
 //! - [`quasi_harmonic`]: the QH and BQH estimators.
 //! - [`split`]: the split (soft/hard) estimator, and [`basins`]: basin
 //!   detection for periodic coordinates.
-//! - [`legacy`]: the reproduction of the original Python implementation.
 //! - [`pyo3_api`]: the Python extension module.
 
 #![warn(missing_docs)]
@@ -115,6 +112,10 @@ use std::num::NonZero;
 
 pub mod basins;
 pub mod bat_library;
+// Reproduces the original Python implementation bit for bit, for comparison
+// with historical results. A developer tool, kept out of the user docs; the
+// CLI reaches it through the undocumented --legacy flag.
+#[doc(hidden)]
 pub mod legacy;
 pub mod pyo3_api;
 pub mod quasi_harmonic;

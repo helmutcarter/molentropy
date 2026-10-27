@@ -76,7 +76,7 @@ Versions follow [semantic versioning](https://semver.org/); before 1.0, a minor 
 - `src/quasi_harmonic.rs`: the QH and BQH estimators.
 - `src/split.rs`: the split (soft/hard) estimator.
 - `src/basins.rs`: basin detection for periodic coordinates.
-- `src/legacy.rs`: the reproduction of the original Python implementation.
+- `src/legacy.rs`: the reproduction of the original Python implementation. It is a developer tool, reached through the CLI's `--legacy` flag, and is deliberately left out of the user guide, the README, the usage line and the API documentation (`#[doc(hidden)]`).
 - `src/bat_library/`: `.parm7` parser, NetCDF trajectory reader, solute selection, BAT coordinate construction, and ring and rotor classification (`geometry.rs` holds the bond, angle and torsion functions).
 - `src/main.rs`: CLI entry point.
 - `src/pyo3_api.rs`: Python bindings.

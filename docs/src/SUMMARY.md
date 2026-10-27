@@ -17,7 +17,6 @@
 - [Split estimator](split.md)
 - [Per-coordinate entropies](per-coordinate.md)
 - [Correlated frames](correlated-frames.md)
-- [Legacy mode](legacy.md)
 
 # Results
 
