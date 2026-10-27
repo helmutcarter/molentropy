@@ -112,21 +112,21 @@ after it is that replicate's reference `S0 - S1`.
 
 ## Small molecules and peptides at 300 K
 
-Butane has one multi-basin torsion. To set the split estimator's defaults and find where it fails, the same comparison was repeated on 18 small molecules and two peptides in two environments, all at 300 K. The defaults were then checked on 8 more small molecules that played no part in choosing them.
+Butane has one multi-basin torsion. To set the split estimator's defaults and find where it fails, the same comparison was repeated on 18 small molecules and two peptides in two environments, all at 300 K. The defaults were then checked on 8 more small molecules and a third peptide, Trp-cage, that played no part in choosing them.
 
 ### Systems and end states
 
 - **Small molecules**, GAFF2 with AM1-BCC charges, gas phase: alkanes (butane, hexane, decane, hexadecane), molecules from the FreeSolv set, and others chosen as edge cases: a linear group (1-butyne), an intramolecular hydrogen bond (ethylene glycol), a flat double well (biphenyl), a puckering ring (cyclohexane) and a gas-phase zwitterion (GABA). Held out (‡): 3-amino-1-propanol, 1,2-dimethoxyethane, 2,3-dimethylbutane, ethyl acetate, N-ethylacetamide, 1-pentanol, butylbenzene and alanine dipeptide (Ace-Ala-Nme, with GAFF2 like the others).
-- **Peptides**, ff14SB: chignolin (CLN025), a folded β-hairpin, and Ace-(GS)<sub>5</sub>-Nme, a disordered chain, each in vacuum and in GBn2 implicit solvent (mbondi3 radii).
+- **Peptides**, ff14SB: chignolin (CLN025), a folded β-hairpin, and Ace-(GS)<sub>5</sub>-Nme, a disordered chain, each in vacuum and in GBn2 implicit solvent (mbondi3 radii). Held out (‡): Trp-cage (TC5b, model 1 of PDB 1L2Y), a 20-residue folded mini-protein, in GBn2 only.
 - **State 1** is the molecule with its full force field. **State 0** keeps bonds and angles but has every dihedral term, charge and Lennard-Jones parameter switched off, and in GBn2 the solvation term too. For the molecules marked † state 0 keeps impropers and the torsions about ring bonds, so rings stay planar and only rotatable bonds become free; for the two marked "ring torsions off" the ring is floppy in state 0.
 
 ### Reference
 
-Hamiltonian replica exchange over λ windows (neighbor swaps every ps) with MBAR, along a path that scales the torsions linearly and the nonbonded terms with a soft core (Beutler, α = 0.5), on λ<sub>k</sub> = sin²(πk/2(K−1)). Small molecules: 21 windows of 10 ns, 2 fs steps, X-H bonds constrained; butane and hexane used independent windows and thermodynamic integration instead. Peptides: 32 (GS) or 40 (chignolin) windows of 30 ns, 4 fs steps with hydrogen mass repartitioning. T ΔS = ΔU − ΔA as for butane. Three replicates each; the table gives the mean and standard deviation of S0 − S1.
+Hamiltonian replica exchange over λ windows (neighbor swaps every ps) with MBAR, along a path that scales the torsions linearly and the nonbonded terms with a soft core (Beutler, α = 0.5), on λ<sub>k</sub> = sin²(πk/2(K−1)). Small molecules: 21 windows of 10 ns, 2 fs steps, X-H bonds constrained; butane and hexane used independent windows and thermodynamic integration instead. Peptides: 32 (GS), 40 (chignolin) or 56 (Trp-cage) windows of 30 ns, 4 fs steps with hydrogen mass repartitioning. T ΔS = ΔU − ΔA as for butane. Three replicates each; the table gives the mean and standard deviation of S0 − S1.
 
 Checks on the references:
 
-- **Replicates** agree to 0.01–0.12 nats for the small molecules and 0.04–0.4 for the GS chain. Chignolin's differ by up to 6 nats: its folding equilibrium is not converged, so its errors below are good to about ±3 nats.
+- **Replicates** agree to 0.01–0.12 nats for the small molecules and 0.04–0.4 for the GS chain. Chignolin's differ by up to 6 nats: its folding equilibrium is not converged, so its errors below are good to about ±3 nats. Trp-cage's agree to 1.0 nats (326.80, 325.76, 325.89).
 - **Finite differences**: for three molecules simulated identically at 300 and 320 K, −∂ΔA/∂T from the two free energies agreed with (ΔU − ΔA)/T within its error (0.03–0.41 nats against errors of 0.2–0.3), which rules out a problem in the mean energies.
 - **Constraints**: four molecules rerun without constraints (1 fs) gave references 0.03–0.07 nats higher. This is within the noise of the comparisons below.
 
@@ -168,6 +168,7 @@ Each estimate uses the end-state frames (one per ps) of the same replicate, phas
 | Ace-(GS)5-Nme, vacuum | 43 | 136.86 ± 0.37 | 50.05 | 40.55 | 57.28 | +56.95 | 53.37 | **28.93** | 63.66 |
 | chignolin CLN025, GBn2 | 50 | 194.59 ± 3.00 | 21.45 | 5.30 | 30.34 | +29.46 | 26.98 | **3.61** | fails |
 | chignolin CLN025, vacuum | 50 | 231.73 ± 3.31 | 53.44 | 35.00 | 164.76 | +163.98 | 158.41 | **28.13** | 193.72 |
+| Trp-cage TC5b, GBn2 ‡ | 99 | 326.15 ± 0.57 | 48.66 | 24.66 | **6.27** | -3.29 | 10.38 | 16.89 | fails |
 
 QH and BQH are `estimate_quasi_harmonic_entropy` with complex torsions.
 
@@ -175,11 +176,25 @@ QH and BQH are `estimate_quasi_harmonic_entropy` with complex torsions.
 
 - **On small flexible molecules the split estimator is the best general choice.** On the 23 small molecules with only rotatable bonds free in state 0 (all but the two "ring torsions off" rows and GABA), the default was within 0.5 nats on 20, with an RMSE of 0.38 and 0.84 at worst. It beat BQH on all but hexane. QH misses multi-basin torsions by up to 13 nats.
 - **Three harmonics in the coupling held up on new molecules.** On the 15 molecules used to choose it, three harmonics instead of cos/sin cut the RMSE from 0.70 to 0.36 nats. On the 8 held-out ones it cut it from 0.61 to 0.41, improving 6 of the 8. Higher harmonics let a hard coordinate depend on which well a torsion is in, or on cos 3φ as an eclipsed bond angle does. Cos/sin alone left S0 − S1 too low on almost every molecule. It is still better on butane, hexane and trimethoxyethane, by up to 0.13 nats, and on alanine dipeptide, where three harmonics overshoot by 0.6. On each end state alone the coupling is biased downward by about (soft features × hard coordinates) / 2n, as for any Gaussian mutual information. That bias is the same in both end states and cancels in S0 − S1, which was unchanged from 1,250 to 30,000 frames.
-- **MIST** (`--soft-estimator mist`) is the soft estimator for folded peptides. It was within 3.6 nats on chignolin in GBn2 (BQH 5.3) and 28 in vacuum (BQH 35). It also roughly halved the error on the GS chain in vacuum, and it nailed alanine dipeptide (0.08). MIE-2 subtracts every pairwise mutual information and so overcounts dependence when many torsions are coupled, which is why the default overestimated the entropy change of chignolin by 30–165 nats. On small molecules MIST was worse than MIE-2 (RMSE 0.61 against 0.38), most of all with hydrogen bonds (aminopropanol 1.2, trimethoxyethane 1.2). On the disordered GS chain in GBn2 it was worse too (14 against 7).
+- **No estimator is reliable to a few nats on peptides.** MIST (`--soft-estimator mist`) was within 3.6 nats on chignolin in GBn2 (BQH 5.3) and 28 in vacuum (BQH 35), roughly halved the error on the GS chain in vacuum, and nailed alanine dipeptide (0.08). But on the held-out Trp-cage it underestimated the entropy change by 17 nats (5%), so its chignolin result does not carry over. MIE-2 subtracts every pairwise mutual information and so overcounts dependence when many torsions are coupled, which is why the default overestimated the entropy change of chignolin by 30–165 nats. On Trp-cage the default had the lowest RMSE (6.3), but its error ranged from −7 to +4 across replicates and jumped between strides (below), so that was luck. MIST and BQH were stable across strides on both folded peptides, which makes them the safer choice, but they can be stably wrong by 5–10% of the entropy change. On small molecules MIST was worse than MIE-2 (RMSE 0.61 against 0.38), most of all with hydrogen bonds (aminopropanol 1.2, trimethoxyethane 1.2). On the disordered GS chain in GBn2 it was worse too (14 against 7).
 - **Per-state coupling** is better when there are few, well-sampled states (biphenyl 0.02, the ring-kept benzamide 0.34), and worse or impossible with many (hexane, decane and longer).
 - **Compact molecules are hardest.** The GABA zwitterion, which folds into a salt bridge, was off by 1.0 nats with only 4 soft torsions.
 - **Rings**: with the topological soft set a puckering cyclohexane falls to QH (0.6 nats); BQH was off by 6.8 there. Soft-set detection with MIE-2 was off by 8–10 nats, because the pairwise MIE cannot represent the ring closure; the joint soft estimator was within 0.14. With a benzamide's ring torsions off, plain QH was best.
 - **Linear groups** (1-butyne) need nothing special.
+
+### Peptides across strides
+
+An estimate that changes direction when frames are dropped is dominated by noise; see [Finite-sampling bias](finite-sampling-bias.md#checking-a-result). For the held-out Trp-cage, the error in S0 − S1 (mean of three replicates, nats) from every Nth frame:
+
+| every Nth frame | split (default) | split, MIST | BQH |
+|---|---|---|---|
+| 1 | −3.3 | −16.7 | −24.6 |
+| 2 | −9.8 | −17.6 | −24.4 |
+| 4 | −4.0 | −18.2 | −24.4 |
+| 8 | −6.7 | −18.9 | −24.0 |
+| 16 | +0.3 | −18.6 | −23.6 |
+
+The default moved by up to 10 nats from one stride to the next and changed direction, as it did on chignolin (+44.5, +27.4, +32.8, +28.4 and +29.5 from 1,875 to 30,000 frames). MIST and BQH moved by 2 nats or less: they converged, to values 17 and 24 nats too low.
 
 ### Best estimator for each system
 
@@ -205,7 +220,8 @@ The lowest RMSE in each row of the table above, and the default's where it was n
 | Ace-(GS)<sub>5</sub>-Nme, vacuum | split, MIST | 29 | 57 | BQH 41 |
 | chignolin, GBn2 | split, MIST | 3.6 | 30 | BQH 5.3 |
 | chignolin, vacuum | split, MIST | 28 | 165 | BQH 35 |
+| Trp-cage, GBn2 ‡ | split (default) | 6.3 | | unstable across replicates and strides; MIST 17 and BQH 25, both stable |
 
-The default was the best, or within 0.15 nats of the best, on 22 of the 26 small molecules. The exceptions were biphenyl and the ring-kept nitrobenzamide, where per-state coupling was better; the nitrobenzamide with ring torsions off, where QH was better; and alanine dipeptide, where MIST was better. On the peptides MIST was best in three of four. The exception was the disordered chain in implicit solvent.
+The default was the best, or within 0.15 nats of the best, on 22 of the 26 small molecules. The exceptions were biphenyl and the ring-kept nitrobenzamide, where per-state coupling was better; the nitrobenzamide with ring torsions off, where QH was better; and alanine dipeptide, where MIST was better. On the five peptide systems MIST was best in three. The default was best on the disordered chain in implicit solvent and on Trp-cage, but on Trp-cage only by chance; see [Peptides across strides](#peptides-across-strides).
 
 These results set the defaults and the warning above 20 soft coordinates. They are estimates for these molecules, not error bars for others.

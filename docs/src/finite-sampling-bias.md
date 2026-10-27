@@ -34,6 +34,7 @@ Cancellation needs the bias to be about the same in both ensembles. It was not f
 
 - **Hexadecane** (15 soft torsions): the error fell from +4.13 to +0.18 nats between 625 and 10,000 frames. The two end states drifted by 10.4 and 14.4 nats, so 3.9 nats did not cancel.
 - **Chignolin in GBn2** (50 soft torsions): the end states drifted by 50 and 65 nats, so 15 nats did not cancel, and the error jumped between strides (+44.5, +27.4, +32.8, +28.4, +29.5 from 1,875 to 30,000 frames) rather than settling.
+- **Trp-cage in GBn2** (99 soft torsions, held out): the error went −3.3, −9.8, −4.0, −6.7 and +0.3 nats at every 1st, 2nd, 4th, 8th and 16th frame, while MIST stayed between −16.7 and −18.9; see [Validation](validation.md#peptides-across-strides).
 - **Alanine dipeptide**: the default's overshoot grew from +0.03 to +0.60 nats with more frames. With fewer frames it was right only by chance.
 
 With MIST soft entropies the same molecules converged: the difference moved by 0.3 nats on hexadecane and 1.4 on chignolin. Cancellation also needs the two ensembles to have the same coordinates and about the same number of frames. A Gaussian term's bias scales as 1/n, so comparing 5,000 frames with 50,000 leaves most of the smaller run's bias in the difference.
