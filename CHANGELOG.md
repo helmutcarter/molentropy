@@ -19,8 +19,7 @@ First release, under the name molentropy (previously nn-entropy).
   - quasi-harmonic (QH) and Boltzmann quasi-harmonic (BQH);
   - a split estimator: soft torsions by MIE, MIST or the joint estimate, stiff
     coordinates by QH or BQH, and a Gaussian (Fourier-harmonic) or per-state
-    coupling term;
-  - legacy mode, which reproduces the original Python implementation.
+    coupling term.
 - Per-coordinate entropies for every estimator except the joint estimate.
 - Theiler windows for time-correlated frames, and exact finite-sample constants.
 - Results are bit-for-bit reproducible across runs and thread counts.
