@@ -13,8 +13,8 @@ use molentropy::split::{
     estimate_split_entropy, large_soft_set_warning,
 };
 use molentropy::{
-    CoordinateMetric, EntropyOptions, FiniteSampleConstant, calculate_entropy,
-    estimate_coordinate_entropy, estimate_coordinate_mutual_information,
+    CoordinateMetric, DEFAULT_NETWORK_PARENTS, EntropyOptions, FiniteSampleConstant,
+    calculate_entropy, estimate_coordinate_entropy, estimate_coordinate_mutual_information,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -116,7 +116,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         fail(format!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|joint] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|network|joint] [--network-parents N] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]",
             args[0]
         ));
     }
@@ -141,6 +141,7 @@ fn main() {
     // Split-estimator settings; None leaves the default.
     let mut soft: Option<CoordinateChoice> = None;
     let mut soft_estimator: Option<SoftEstimator> = None;
+    let mut network_parents: Option<usize> = None;
     let mut hard_estimator: Option<HardEstimator> = None;
     let mut coupling: Option<CouplingFlag> = None;
     let mut soft_features: Option<SoftFeatures> = None;
@@ -245,6 +246,12 @@ fn main() {
                     &[
                         ("mie", SoftEstimator::NearestNeighborMie { order: 2 }),
                         ("mist", SoftEstimator::MutualInformationSpanningTree),
+                        (
+                            "network",
+                            SoftEstimator::BayesianNetwork {
+                                parents: DEFAULT_NETWORK_PARENTS,
+                            },
+                        ),
                         ("joint", SoftEstimator::JointNearestNeighbor),
                     ],
                 ));
@@ -301,6 +308,10 @@ fn main() {
                 min_state_frames = Some(flag_value(&args, i));
                 i += 2;
             }
+            "--network-parents" => {
+                network_parents = Some(flag_value(&args, i));
+                i += 2;
+            }
             "--periodic-correlation" => {
                 if i + 1 >= args.len() {
                     fail("--periodic-correlation requires a value");
@@ -351,6 +362,11 @@ fn main() {
     }
     let mie_soft =
         soft_estimator.is_none_or(|e| matches!(e, SoftEstimator::NearestNeighborMie { .. }));
+    if network_parents.is_some()
+        && !(split && matches!(soft_estimator, Some(SoftEstimator::BayesianNetwork { .. })))
+    {
+        fail("--network-parents applies only to split with --soft-estimator network");
+    }
     if mie_order != 2 && !(estimator == Estimator::NearestNeighbor || (split && mie_soft)) {
         fail("--mie-order applies only to --estimator nn, or to split with --soft-estimator mie");
     }
@@ -520,7 +536,10 @@ fn main() {
                     SoftEstimator::NearestNeighborMie { .. } => {
                         SoftEstimator::NearestNeighborMie { order: mie_order }
                     }
-                    joint => joint,
+                    SoftEstimator::BayesianNetwork { .. } => SoftEstimator::BayesianNetwork {
+                        parents: network_parents.unwrap_or(DEFAULT_NETWORK_PARENTS),
+                    },
+                    other => other,
                 };
             } else {
                 settings.soft_estimator = SoftEstimator::NearestNeighborMie { order: mie_order };

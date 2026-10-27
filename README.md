@@ -7,7 +7,7 @@ Estimate the configurational entropy of a molecular system, with a Rust library,
 The crate converts Amber trajectories to internal coordinates (bond lengths, bond angles, and torsions) and estimates their entropy. File-based calculations use linear metrics for bonds and angles and a 2π-periodic metric for torsions.
 
 ## Features
-- Estimators: the nearest-neighbor mutual information expansion (NN MIE) up to fourth order, with pairwise mutual information; the mutual information spanning tree (MIST); quasi-harmonic (QH) and Boltzmann quasi-harmonic (BQH) entropy; and a split estimator that treats soft torsions non-parametrically and stiff coordinates with a Gaussian. Every estimator but the joint nearest-neighbor estimate can also report each coordinate's share of the entropy.
+- Estimators: the nearest-neighbor mutual information expansion (NN MIE) up to fourth order, with pairwise mutual information; the mutual information spanning tree (MIST) and its extension to a Bayesian network; quasi-harmonic (QH) and Boltzmann quasi-harmonic (BQH) entropy; and a split estimator that treats soft torsions non-parametrically and stiff coordinates with a Gaussian. Every estimator but the joint nearest-neighbor estimate can also report each coordinate's share of the entropy.
 - Validated against thermodynamic reference entropies; see [Validation](https://helmutcarter.github.io/molentropy/validation.html).
 - A CLI that reads `.parm7` + `.nc`, a Rust library, and Python bindings via `pyo3` for in-memory arrays or file-based calculation.
 - A [user guide](https://helmutcarter.github.io/molentropy/) covering the CLI, Python and Rust interfaces and the methods.
@@ -32,7 +32,7 @@ For the Python module, use [maturin](https://www.maturin.rs/): `maturin develop 
 From the command line:
 
 ```bash
-cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|joint] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]
+cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|network|joint] [--network-parents N] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]
 ```
 
 Example:

@@ -33,7 +33,8 @@ use crate::quasi_harmonic::{
 };
 use crate::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_entropy,
-    estimate_coordinate_mist_entropy, estimate_joint_entropy, estimate_mist_entropy, resolve_input,
+    estimate_coordinate_mist_entropy, estimate_coordinate_network_entropy, estimate_joint_entropy,
+    estimate_mist_entropy, estimate_network_entropy, resolve_input,
 };
 
 /// Above this many soft coordinates the front ends warn that the split
@@ -78,6 +79,12 @@ pub enum SoftEstimator {
     /// The mutual information spanning tree; see
     /// [`estimate_mist_entropy`].
     MutualInformationSpanningTree,
+    /// A Bayesian network with up to `parents` parents per coordinate; see
+    /// [`estimate_network_entropy`].
+    BayesianNetwork {
+        /// Parents per coordinate, 1 (MIST) to `MAX_JOINT_DIMENSION - 1`.
+        parents: usize,
+    },
 }
 
 impl Default for SoftEstimator {
@@ -420,6 +427,12 @@ fn split_parts(
                 frames_end,
                 &with_metrics(options, &soft_metrics),
             ),
+            SoftEstimator::BayesianNetwork { parents } => estimate_network_entropy(
+                &soft_data,
+                frames_end,
+                parents,
+                &with_metrics(options, &soft_metrics),
+            ),
         }
         .map_err(|err| format!("soft set: {err}"))?;
         if want_shares {
@@ -431,8 +444,14 @@ fn split_parts(
                 SoftEstimator::MutualInformationSpanningTree => {
                     estimate_coordinate_mist_entropy(&soft_data, frames_end, &soft_options)
                 }
+                SoftEstimator::BayesianNetwork { parents } => estimate_coordinate_network_entropy(
+                    &soft_data,
+                    frames_end,
+                    parents,
+                    &soft_options,
+                ),
                 SoftEstimator::JointNearestNeighbor => Err(
-                    "the joint soft estimate has no per-coordinate split; use the MIE or MIST"
+                    "the joint soft estimate has no per-coordinate split; use the MIE, MIST or network"
                         .to_string(),
                 ),
             }

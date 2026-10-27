@@ -332,6 +332,10 @@ def check_split():
     assert abs(sum(parts["own"]) - result["soft"] - result["hard"]) < 1e-9
     mist = molentropy.estimate_split_entropy(data, periods=periods, soft_estimator="mist")
     assert mist["soft"] == result["soft"]  # one soft coordinate: MIST is its entropy
+    network = molentropy.estimate_split_entropy(
+        data, periods=periods, soft_estimator="network", network_parents=2
+    )
+    assert network["soft"] == result["soft"]  # likewise for the Bayesian network
 
     states = molentropy.estimate_split_entropy(
         data, periods=periods, soft=[0], coupling="states", state_labels=list(well)

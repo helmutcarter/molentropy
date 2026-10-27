@@ -19,7 +19,7 @@ use molentropy::split::{
 };
 use molentropy::{
     CoordinateMetric, EntropyOptions, MAX_JOINT_DIMENSION, calculate_entropy,
-    estimate_joint_entropy, estimate_mist_entropy,
+    estimate_joint_entropy, estimate_mist_entropy, estimate_network_entropy,
 };
 
 const TORSION: CoordinateMetric = CoordinateMetric::Periodic { period: TAU };
@@ -174,6 +174,13 @@ fn without_hard_coordinates_it_is_the_soft_entropy() {
     assert_eq!(
         split(&data, &metrics, &mist).total,
         estimate_mist_entropy(&data, 3_000, &options(&metrics)).unwrap()
+    );
+
+    let mut network = SplitOptions::new(SoftSelection::Indices(&[0, 1, 2]));
+    network.soft_estimator = SoftEstimator::BayesianNetwork { parents: 2 };
+    assert_eq!(
+        split(&data, &metrics, &network).total,
+        estimate_network_entropy(&data, 3_000, 2, &options(&metrics)).unwrap()
     );
 }
 
@@ -843,6 +850,25 @@ mod cli {
             value(&mist, "Total entropy").parse::<f64>().unwrap(),
             expected.total
         );
+        let network = lines(&run(
+            &top,
+            &traj,
+            &[
+                "--estimator",
+                "split",
+                "--soft-estimator",
+                "network",
+                "--network-parents",
+                "3",
+            ],
+        ));
+        let expected = library(&top, &traj, |settings, _| {
+            settings.soft_estimator = SoftEstimator::BayesianNetwork { parents: 3 };
+        });
+        assert_eq!(
+            value(&network, "Total entropy").parse::<f64>().unwrap(),
+            expected.total
+        );
         let cos_sin = lines(&run(
             &top,
             &traj,
@@ -1027,6 +1053,17 @@ mod cli {
                     "3",
                 ][..],
                 "--mie-order applies only",
+            ),
+            (
+                &[
+                    "--estimator",
+                    "split",
+                    "--soft-estimator",
+                    "mist",
+                    "--network-parents",
+                    "3",
+                ][..],
+                "--network-parents applies only",
             ),
             (
                 &["--estimator", "split", "--state-torsions", "auto"][..],

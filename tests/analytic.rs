@@ -20,7 +20,7 @@ use common::{
 };
 use molentropy::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_mutual_information,
-    estimate_mist_entropy,
+    estimate_mist_entropy, estimate_network_entropy,
 };
 
 const REPLICATES: usize = 5;
@@ -334,6 +334,69 @@ fn mist_of_one_or_two_coordinates_is_the_mie() {
     let mist = estimate_mist_entropy(&two, 5_000, &options).unwrap();
     let mie = calculate_entropy(&two, 5_000, 2, &options).unwrap();
     assert!((mist - mie).abs() < 1e-12, "{mist} vs {mie}");
+}
+
+#[test]
+fn network_is_exact_for_a_collider_that_mist_overestimates() {
+    // x1 and x2 independent, x3 = a (x1 + x2) + noise: x3 depends on both
+    // jointly. The spanning tree (1-3, 3-2) treats x1 and x2 as independent
+    // given x3, so MIST exceeds the joint entropy by I(x1; x2 | x3). Given two
+    // parents, x2 is conditioned on x3 and x1 together and the chain rule is
+    // exact.
+    let (a, s) = (0.6, 0.5);
+    let n = 20_000;
+    let exact = 2.0 * normal_entropy(1.0) + normal_entropy(s);
+    let sample = |seed: u64| {
+        let mut rng = Rng::new(seed);
+        let x1 = rng.normal_vec(n, 0.0, 1.0);
+        let x2 = rng.normal_vec(n, 0.0, 1.0);
+        let x3: Vec<f64> = x1
+            .iter()
+            .zip(&x2)
+            .map(|(p, q)| a * (p + q) + s * rng.normal())
+            .collect();
+        vec![x1, x2, x3]
+    };
+    let metrics = linear(3);
+    let options = EntropyOptions {
+        metrics: Some(&metrics),
+        ..Default::default()
+    };
+    let (network, spread) =
+        replicate_mean(|seed| estimate_network_entropy(&sample(seed), n, 2, &options).unwrap());
+    check(
+        "Bayesian network, two parents",
+        network,
+        exact,
+        spread,
+        0.03,
+    );
+    let (mist, _) =
+        replicate_mean(|seed| estimate_mist_entropy(&sample(seed), n, &options).unwrap());
+    assert!(
+        mist - exact > 0.15,
+        "MIST {mist} should exceed the joint entropy {exact} by I(x1; x2 | x3)"
+    );
+}
+
+#[test]
+fn network_with_one_parent_is_mist() {
+    let mut rng = Rng::new(23);
+    let n = 3_000;
+    let data: Vec<Vec<f64>> = (0..5).map(|_| rng.normal_vec(n, 0.0, 1.0)).collect();
+    let metrics = linear(5);
+    let options = EntropyOptions {
+        metrics: Some(&metrics),
+        ..Default::default()
+    };
+    assert_eq!(
+        estimate_network_entropy(&data, n, 1, &options).unwrap(),
+        estimate_mist_entropy(&data, n, &options).unwrap()
+    );
+    for parents in [0, 8] {
+        let err = estimate_network_entropy(&data, n, parents, &options).unwrap_err();
+        assert!(err.contains("1 to 7 parents"), "{err}");
+    }
 }
 
 // ---------------------------------------------------------------------------

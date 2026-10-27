@@ -4,6 +4,13 @@ All notable changes to molentropy are recorded here. Versions follow
 [semantic versioning](https://semver.org/); before 1.0, a minor version may
 change the API or the default estimates.
 
+## [Unreleased]
+
+- A Bayesian network soft estimator (`estimate_network_entropy`,
+  `--soft-estimator network`, `soft_estimator="network"`): MIST with each
+  coordinate conditioned on up to several earlier ones (5 by default) instead
+  of one. On peptides it halves MIST's error; see the validation page.
+
 ## [0.1.0] - 2026-10-26
 
 First release, under the name molentropy (previously nn-entropy).

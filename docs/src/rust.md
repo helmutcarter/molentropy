@@ -35,6 +35,7 @@ The NN MIE functions all take an `EntropyOptions`, described under [Nearest-neig
 - `estimate_coordinate_entropy(data, frames_end, mie_order, &options)` returns each coordinate's share of the entropy at MIE order 1 to 4, so the values sum to `calculate_entropy` at the same order and with the same options. Order 1 gives the marginal entropies; higher orders split each interaction term evenly among its coordinates. See [Per-coordinate entropies](per-coordinate.md).
 - `estimate_coordinate_mutual_information(data, frames_end, &options)` returns the mutual information of each coordinate pair.
 - `estimate_mist_entropy(data, frames_end, &options)` returns the mutual information spanning tree (MIST) entropy; see [NN MIE](nn-mie.md). `estimate_coordinate_mist_entropy` takes the same arguments and returns each coordinate's share.
+- `estimate_network_entropy(data, frames_end, parents, &options)` returns the Bayesian network entropy, MIST with up to `parents` (1 to 7; `DEFAULT_NETWORK_PARENTS` is 5) parents per coordinate; see [NN MIE](nn-mie.md). `estimate_coordinate_network_entropy` takes the same arguments and returns each coordinate's share.
 - `calc_joint_nn([&x, &y, ...], metrics)` is the underlying nearest-neighbor sum, `sum over frames of ln(nearest-neighbor distance)`, in any number of dimensions; the MIE uses 1 to 4. `calc_joint_nn_with_window(coordinates, metrics, w)` is the same sum with a Theiler window.
 
 To build coordinates from files, use `bat_library::InternalCoordinates`:

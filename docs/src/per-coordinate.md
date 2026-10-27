@@ -15,6 +15,7 @@ Use them to compare the same coordinate between two ensembles under the same est
 | NN MIE, order 1 | its marginal entropy | `estimate_coordinate_entropy` |
 | NN MIE, orders 2 to 4 | its marginal entropy, plus an equal part of every interaction term it is part of | `estimate_coordinate_entropy` |
 | MIST | its marginal entropy, minus half the mutual information of each spanning-tree link it is part of | `estimate_coordinate_mist_entropy` (Rust); the split estimator's soft set |
+| Bayesian network | its marginal entropy, minus half the mutual information between it and its parents, minus an equal part of the other half for each coordinate it is a parent of (with one parent, the MIST share) | `estimate_coordinate_network_entropy` (Rust); the split estimator's soft set |
 | QH, BQH | its first-order term, plus ½ (log C)<sub>ii</sub> | `estimate_coordinate_quasi_harmonic_entropy`; see [Quasi-harmonic estimators](quasi-harmonic.md#per-coordinate-entropies) |
 | split | its share of the soft or hard entropy as above, plus its share of the coupling | `estimate_coordinate_split_entropy` (Rust), `estimate_split_entropy(..., per_coordinate=True)` (Python) |
 | joint NN | not available | |
