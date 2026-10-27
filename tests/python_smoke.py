@@ -27,6 +27,7 @@ EULER_MASCHERONI = float(np.euler_gamma)
 
 EXPECTED_EXPORTS = {
     "System",
+    "estimate_pca_entropy",
     "load_system",
     "estimate_entropy",
     "estimate_coordinate_entropy",
@@ -367,6 +368,23 @@ def check_split():
     print(f"split: {result['total']!r}, soft torsions {system.soft_torsions}")
 
 
+def check_pca():
+    fixtures = Path(__file__).resolve().parent / "fixtures"
+    top, traj = str(fixtures / "test.parm7"), str(fixtures / "test.nc")
+    result = molentropy.estimate_pca_entropy(top, traj, neighbors=1)
+    for key in ("total", "quasi_harmonic", "anharmonic", "mutual_information", "classical_modes", "frames", "eigenvalues"):
+        assert key in result, key
+    assert abs(result["total"] - (result["quasi_harmonic"] - result["anharmonic"] - result["mutual_information"])) < 1e-9
+    assert result["anharmonic"] >= 0 and result["mutual_information"] >= 0
+    try:
+        molentropy.estimate_pca_entropy(top, traj, temperature=-1.0)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a negative temperature was accepted")
+    print(f"pca: total {result['total']:.3f} over {result['frames']} frames, {result['classical_modes']} classical modes")
+
+
 def main():
     for check in (
         check_exports,
@@ -381,6 +399,7 @@ def main():
         check_coordinate_options,
         check_quasi_harmonic,
         check_split,
+        check_pca,
     ):
         check()
     print("\nall smoke checks passed")

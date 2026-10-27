@@ -495,3 +495,57 @@ fn mutual_information_table_lists_every_pair() {
         );
     }
 }
+
+#[test]
+fn pca_estimator_reports_its_parts_and_refuses_other_flags() {
+    let top = fixture("tests/fixtures/test.parm7");
+    let traj = fixture("tests/fixtures/test.nc");
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_molentropy"))
+            .args([
+                top.to_str().unwrap(),
+                traj.to_str().unwrap(),
+                "--estimator",
+                "pca",
+            ])
+            .args(extra)
+            .output()
+            .expect("failed to run CLI")
+    };
+    let output = run(&["--temperature", "310", "--neighbors", "3"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value = |name: &str| -> f64 {
+        stdout
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{name} = ")))
+            .unwrap_or_else(|| panic!("no {name} in {stdout}"))
+            .parse()
+            .unwrap()
+    };
+    let total = value("Total entropy");
+    let parts = value("Quasi-harmonic (quantum)")
+        - value("Anharmonic correction")
+        - value("Mutual information correction");
+    assert!((total - parts).abs() < 1e-9 * total.abs().max(1.0));
+    let refused = run(&["--mie-order", "3"]);
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr)
+            .contains("cannot be combined with --estimator pca")
+    );
+    let stray = Command::new(env!("CARGO_BIN_EXE_molentropy"))
+        .args([
+            top.to_str().unwrap(),
+            traj.to_str().unwrap(),
+            "--temperature",
+            "300",
+        ])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&stray.stderr).contains("apply only to --estimator pca"));
+}

@@ -5,4 +5,5 @@
 - [Sample Estimate of the Entropy of a Random Vector](https://dmitripavlov.org/scans/kozachenko-leonenko.pdf) - First introduction of nearest neighbors entropy estimation
 - [Calculation of Configurational Entropy with a Boltzmann-Quasiharmonic Model: The Origin of High-Affinity Protein-Ligand Binding](https://doi.org/10.1021/jp111176x) - Harpole and Sharp's BQH method, including the `e^{iφ}` treatment of torsion correlations
 - [Developing end-point methods for absolute binding free energy calculation using the Boltzmann-quasiharmonic model](https://pmc.ncbi.nlm.nih.gov/articles/PMC9044818/) - BQH and QH compared for host-guest binding
+- Conformational entropy of biomolecules: beyond the quasi-harmonic approximation - Numata, Wan and Knapp (*Genome Informatics* 18, 192, 2007): mass-weighted Cartesian PCA with anharmonic and pairwise mutual-information corrections, the experimental `pca` estimator
 - [Method for estimating the configurational entropy of macromolecules](https://doi.org/10.1021/ma50003a019) - Karplus and Kushick's quasi-harmonic approximation

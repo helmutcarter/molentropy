@@ -101,6 +101,9 @@
 //! - [`quasi_harmonic`]: the QH and BQH estimators.
 //! - [`split`]: the split (soft/hard) estimator, and [`basins`]: basin
 //!   detection for periodic coordinates.
+//! - [`pca`]: **experimental**, the entropy of mass-weighted Cartesian
+//!   principal components with anharmonic and pairwise corrections, kept for
+//!   comparison and not validated.
 //! - [`pyo3_api`]: the Python extension module.
 
 #![warn(missing_docs)]
@@ -117,6 +120,7 @@ pub mod bat_library;
 // CLI reaches it through the undocumented --legacy flag.
 #[doc(hidden)]
 pub mod legacy;
+pub mod pca;
 pub mod pyo3_api;
 pub mod quasi_harmonic;
 pub mod split;

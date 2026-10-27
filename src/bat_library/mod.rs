@@ -901,6 +901,37 @@ pub struct InternalCoordinates {
     pub pairs: Vec<(usize, usize)>,
 }
 
+/// The Cartesian frames of a topology's solute: the atoms
+/// [`InternalCoordinates`] would use (water and massless virtual sites left
+/// out), in topology order.
+pub struct SoluteFrames {
+    /// Topology indices of the solute atoms, ascending.
+    pub atoms: Vec<usize>,
+    /// Their masses, amu.
+    pub masses: Vec<f64>,
+    /// Positions, `frames[frame][atom]`, in the trajectory's units (A for Amber).
+    pub frames: Vec<Vec<[f64; 3]>>,
+}
+
+/// Reads up to `frames` frames (`usize::MAX` for all) of the solute of the
+/// topology at `top` from the NetCDF trajectory at `traj`.
+pub fn read_solute_frames(top: &Path, traj: &Path, frames: usize) -> Result<SoluteFrames> {
+    let prmtop = parse_prmtop(top)?;
+    if prmtop.masses.len() != prmtop.natom || prmtop.atom_types.len() != prmtop.natom {
+        return Err("topology MASS or atom type section is shorter than NATOM".into());
+    }
+    let atoms: Vec<usize> = (0..prmtop.natom)
+        .filter(|&i| !is_excluded(&prmtop, i))
+        .collect();
+    let mut reader = NetcdfReader::open(traj, prmtop.natom)?;
+    let positions = reader.read_coordinates_f64(frames, &atoms)?;
+    Ok(SoluteFrames {
+        masses: atoms.iter().map(|&i| prmtop.masses[i]).collect(),
+        atoms,
+        frames: positions,
+    })
+}
+
 /// Amber atom types that belong only to water models (including the extra
 /// point of four-point models such as TIP4P-Ew and OPC).
 const WATER_ATOM_TYPES: [&str; 4] = ["OW", "HW", "EP", "EPW"];
