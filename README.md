@@ -74,7 +74,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the test suite, CI, and the layout of
 
 ## Citing
 
-If you use molentropy in published work, please cite the release you used. Each [release](https://github.com/helmutcarter/molentropy/releases) is archived on Zenodo with its own DOI; [`CITATION.cff`](CITATION.cff) has the citation metadata, and GitHub's "Cite this repository" button formats it. Changes between releases are listed in [CHANGELOG.md](CHANGELOG.md).
+If you use molentropy in published work, please cite the release you used. Each [release](https://github.com/helmutcarter/molentropy/releases) will eventually be archived on Zenodo with its own DOI; [`CITATION.cff`](CITATION.cff) has the citation metadata, and GitHub's "Cite this repository" button formats it. Changes between releases are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
