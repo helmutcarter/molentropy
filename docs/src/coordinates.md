@@ -2,11 +2,27 @@
 
 By default, file-based calculations use every bond between two heavy atoms (ring closures included), plus the BAT tree's angles and torsions, with phase angles in place of redundant torsions. Bonds to hydrogen are left out because they are usually constrained.
 
-**Tree bonds** (`--tree-bonds`, `tree_bonds=True`, `BondSet::Tree`) use the bonds of the BAT spanning tree: the two root bonds and the bond that places each later atom, with hydrogens included and ring closures left out. Together with the angles and torsions, this gives exactly 3N - 6 non-redundant coordinates per molecule (one bond for a diatomic, including one with hydrogen). This is the coordinate set the BAT Jacobian is defined for.
+**Tree bonds** (`--tree-bonds`, `tree_bonds=True`, `BondSet::Tree`) use the bonds of the BAT spanning tree: the two root bonds and the bond that places each later atom, with hydrogens included and ring closures left out. Together with the angles and torsions, this gives exactly 3N - 6 non-redundant coordinates per molecule (one bond for a diatomic, including one with hydrogen). This is the coordinate set the BAT Jacobian is defined for. With constrained bonds to hydrogen, keep the default; see [Choosing the bond set](#choosing-the-bond-set).
 
 **Phase angles** (on by default; `--no-phase-angles`, `phase_angles=False` or `CoordinateOptions::phase_angles` turn them off) group the torsions by central bond. The first torsion about each bond, in coordinate order, keeps its value. Every later torsion about that bond is replaced by its offset from the first one, wrapped to (-π, π]. The offset is still a 2π-periodic coordinate. Because the map is a shear with unit Jacobian, the joint entropy of the full coordinate set is unchanged. A truncated MIE is not invariant, though. The raw torsions of atoms that rotate together, such as the three hydrogens of a methyl group, are strongly correlated, and a second-order expansion misses part of that correlation. Their offsets are stiff and nearly independent of the reference torsion, so less correlation is left beyond second order. Every estimator in the crate does better with them; see [Validation](validation.md). Phase angles work with either bond set and with `--torsions-only`.
 
 **The BAT Jacobian** (`--jacobian`, `System.mean_log_jacobian`, `InternalCoordinates::log_jacobian`) is ln J = Σ 2 ln b + Σ ln sin θ over the tree's bonds and angles. Adding its mean to the BAT entropy gives the entropy of the internal motion measured in Cartesian coordinates. Bond lengths are in the trajectory's units (Å for Amber), so ln J depends on that choice, just as the bond-length entropies do. Phase angles do not change it.
+
+## Choosing the bond set
+
+Keep the default heavy-atom bonds for trajectories with constrained bonds to hydrogen (SHAKE, RATTLE, LINCS), which most production simulations use. Use tree bonds only for unconstrained simulations, or to compute the Jacobian.
+
+A constrained bond does not fluctuate, so as a coordinate it contributes only the noise of the constraint solver and of the stored precision. That noise differs between ensembles, so it does not cancel in a difference. Tree bonds add one such coordinate per hydrogen. On the 23 small molecules and alanine dipeptide of the [validation](validation.md#small-molecules-and-peptides-at-300-k), all run with X-H bonds constrained, tree bonds made every estimator worse. The table gives the RMS error in S0 − S1 against the HREX/MBAR references (nats, means of three replicates, the Jacobian included in both):
+
+| estimator | heavy-atom bonds | tree bonds | systems where tree bonds did better |
+|---|---|---|---|
+| split (default) | **0.37** | 2.00 | 7 of 23 |
+| split, MIST | **0.69** | 2.14 | 8 of 23 |
+| BQH | **1.78** | 3.35 | 9 of 23 |
+
+The largest changes were in the alkanes, whose hydrogens make up most of the extra coordinates. For hexane, the split estimator's error went from +0.12 to −7.7 nats and BQH's from +0.06 to +10.7. For butane, the split estimator's went from +0.08 to −3.8. Without butane and hexane, the split estimator's RMS error was still 0.39 with heavy-atom bonds against 0.92 with tree bonds.
+
+The Jacobian is defined only for the tree set, so `--jacobian` and `mean_log_jacobian` need tree bonds. With constraints, compute the entropy with the default bonds and take the Jacobian from a second load with tree bonds. The constrained bonds' 2 ln b terms are then constant and cancel in a difference between ensembles.
 
 ## Rotatable, ring and rotor torsions
 
