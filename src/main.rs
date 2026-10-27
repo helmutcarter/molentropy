@@ -1,8 +1,11 @@
 use std::env;
 use std::path::Path;
 
-use molentropy::bat_library::{BondSet, CoordinateOptions, Geometry, InternalCoordinates};
+use molentropy::bat_library::{
+    BondSet, CoordinateOptions, Geometry, InternalCoordinates, read_solute_frames,
+};
 use molentropy::legacy::legacy_entropy;
+use molentropy::pca::{PcaOptions, estimate_pca_entropy};
 use molentropy::quasi_harmonic::{
     MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions,
     estimate_coordinate_quasi_harmonic_entropy, estimate_quasi_harmonic_entropy,
@@ -23,6 +26,8 @@ enum Estimator {
     QuasiHarmonic,
     BoltzmannQuasiHarmonic,
     Split,
+    /// Experimental: mass-weighted Cartesian PCA with corrections.
+    Pca,
 }
 
 /// How the split estimator's coupling term is computed, as given on the
@@ -116,7 +121,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         fail(format!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|joint] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--estimator nn|qh|bqh|split|pca] [--temperature K] [--neighbors K] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|joint] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]",
             args[0]
         ));
     }
@@ -134,6 +139,8 @@ fn main() {
     let mut stop: Option<usize> = None;
     let mut legacy = false;
     let mut estimator = Estimator::NearestNeighbor;
+    let mut temperature: Option<f64> = None;
+    let mut neighbors: Option<usize> = None;
     let mut histogram_bins: Option<usize> = None;
     let mut per_coordinate = false;
     let mut mutual_information = false;
@@ -205,6 +212,14 @@ fn main() {
                 legacy = true;
                 i += 1;
             }
+            "--temperature" => {
+                temperature = Some(flag_value(&args, i));
+                i += 2;
+            }
+            "--neighbors" => {
+                neighbors = Some(flag_value(&args, i));
+                i += 2;
+            }
             "--estimator" => {
                 if i + 1 >= args.len() {
                     fail("--estimator requires a value");
@@ -214,9 +229,10 @@ fn main() {
                     "qh" => Estimator::QuasiHarmonic,
                     "bqh" => Estimator::BoltzmannQuasiHarmonic,
                     "split" => Estimator::Split,
+                    "pca" => Estimator::Pca,
                     other => {
                         fail(format!(
-                            "--estimator must be nn, qh, bqh or split, got {other}"
+                            "--estimator must be nn, qh, bqh, split or pca, got {other}"
                         ));
                     }
                 };
@@ -333,6 +349,23 @@ fn main() {
     }
     if jacobian && (!tree_bonds || torsions_only) {
         fail("--jacobian requires --tree-bonds and cannot be combined with --torsions-only");
+    }
+
+    if estimator == Estimator::Pca {
+        pca(
+            &args,
+            top_path,
+            traj_path,
+            start,
+            stop,
+            stride,
+            temperature,
+            neighbors,
+        );
+        return;
+    }
+    if temperature.is_some() || neighbors.is_some() {
+        fail("--temperature and --neighbors apply only to --estimator pca");
     }
 
     let split = estimator == Estimator::Split;
@@ -488,6 +521,7 @@ fn main() {
     // With --per-coordinate, each coordinate's shares of the split entropy.
     let mut split_shares = None;
     let (entropy, terms) = match estimator {
+        Estimator::Pca => unreachable!("--estimator pca returned above"),
         Estimator::Split => {
             let dim = internal.dim;
             let to_indices = |flag: &str, numbers: &[usize]| -> Vec<usize> {
@@ -745,4 +779,70 @@ fn main() {
     }
     // Last, so scripts that read the final "= value" still get the entropy.
     println!("Total entropy = {}", entropy);
+}
+
+/// `--estimator pca`: the experimental PCA entropy of the solute's Cartesian
+/// frames. Takes only the frame selection, `--temperature` and `--neighbors`.
+#[allow(clippy::too_many_arguments)]
+fn pca(
+    args: &[String],
+    top_path: &Path,
+    traj_path: &Path,
+    start: Option<usize>,
+    stop: Option<usize>,
+    stride: usize,
+    temperature: Option<f64>,
+    neighbors: Option<usize>,
+) {
+    const ALLOWED: [&str; 8] = [
+        "--estimator",
+        "--start",
+        "--stop",
+        "--stride",
+        "--temperature",
+        "--neighbors",
+        "pca",
+        "",
+    ];
+    let mut i = 3;
+    while i < args.len() {
+        let flag = args[i].as_str();
+        if !ALLOWED.contains(&flag) {
+            fail(format!("{flag} cannot be combined with --estimator pca"));
+        }
+        i += if flag == "--estimator" || ALLOWED[1..6].contains(&flag) {
+            2
+        } else {
+            1
+        };
+    }
+    let solute = read_solute_frames(top_path, traj_path, stop.unwrap_or(usize::MAX))
+        .unwrap_or_else(|err| fail(format!("Cannot read {}: {err}", traj_path.display())));
+    let frames: Vec<_> = solute
+        .frames
+        .into_iter()
+        .skip(start.unwrap_or(0))
+        .step_by(stride)
+        .collect();
+    let mut options = PcaOptions::default();
+    if let Some(temperature) = temperature {
+        options.temperature = temperature;
+    }
+    if let Some(neighbors) = neighbors {
+        options.neighbors = neighbors;
+    }
+    let result = or_fail(
+        estimate_pca_entropy(&frames, &solute.masses, &options),
+        "Entropy calculation failed",
+    );
+    eprintln!("Note: --estimator pca is experimental and not validated; see the user guide.");
+    println!("Frames = {}", frames.len());
+    println!("Classical modes = {}", result.classical_modes);
+    println!("Quasi-harmonic (quantum) = {}", result.quasi_harmonic);
+    println!("Anharmonic correction = {}", result.anharmonic);
+    println!(
+        "Mutual information correction = {}",
+        result.mutual_information
+    );
+    println!("Total entropy = {}", result.total);
 }

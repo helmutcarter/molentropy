@@ -4,6 +4,15 @@ All notable changes to molentropy are recorded here. Versions follow
 [semantic versioning](https://semver.org/); before 1.0, a minor version may
 change the API or the default estimates.
 
+## [Unreleased]
+
+- **Experimental** PCA estimator (`pca::estimate_pca_entropy`, `--estimator pca`,
+  `estimate_pca_entropy` in Python): mass-weighted Cartesian principal components
+  with anharmonic and pairwise mutual-information corrections (Numata, Wan and
+  Knapp 2007). Kept for comparison; it was far less accurate than the other
+  estimators on the validation set.
+- `bat_library::read_solute_frames` reads a solute's Cartesian frames and masses.
+
 ## [0.1.0] - 2026-10-26
 
 First release, under the name molentropy (previously nn-entropy).

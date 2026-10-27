@@ -1041,6 +1041,62 @@ fn detect_basins(
     Ok(dict.into_py(py))
 }
 
+/// Experimental: the PCA entropy of the solute in a trajectory (mass-weighted
+/// Cartesian principal components with anharmonic and pairwise corrections;
+/// Numata, Wan and Knapp 2007). Not validated; see the user guide. Returns a
+/// dict with `total`, `quasi_harmonic`, `anharmonic`, `mutual_information`,
+/// `classical_modes`, `frames` and `eigenvalues`.
+#[allow(clippy::too_many_arguments)]
+#[pyfunction(signature = (top_path, traj_path, temperature=300.0, neighbors=4, start=0, stop=None, stride=1))]
+fn estimate_pca_entropy(
+    py: Python<'_>,
+    top_path: &str,
+    traj_path: &str,
+    temperature: f64,
+    neighbors: usize,
+    start: usize,
+    stop: Option<usize>,
+    stride: usize,
+) -> PyResult<PyObject> {
+    if stride == 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "stride must be at least 1",
+        ));
+    }
+    let (result, frames) = py
+        .allow_threads(|| {
+            let solute = crate::bat_library::read_solute_frames(
+                top_path.as_ref(),
+                traj_path.as_ref(),
+                stop.unwrap_or(usize::MAX),
+            )
+            .map_err(|err| err.to_string())?;
+            let frames: Vec<_> = solute
+                .frames
+                .into_iter()
+                .skip(start)
+                .step_by(stride)
+                .collect();
+            let options = crate::pca::PcaOptions {
+                temperature,
+                neighbors,
+                ..Default::default()
+            };
+            crate::pca::estimate_pca_entropy(&frames, &solute.masses, &options)
+                .map(|result| (result, frames.len()))
+        })
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let dict = PyDict::new_bound(py);
+    dict.set_item("total", result.total)?;
+    dict.set_item("quasi_harmonic", result.quasi_harmonic)?;
+    dict.set_item("anharmonic", result.anharmonic)?;
+    dict.set_item("mutual_information", result.mutual_information)?;
+    dict.set_item("classical_modes", result.classical_modes)?;
+    dict.set_item("frames", frames)?;
+    dict.set_item("eigenvalues", result.eigenvalues)?;
+    Ok(dict.into())
+}
+
 #[pymodule]
 fn molentropy(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<System>()?;
@@ -1051,6 +1107,7 @@ fn molentropy(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_quasi_harmonic_entropy, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_split_entropy, m)?)?;
     m.add_function(wrap_pyfunction!(detect_basins, m)?)?;
+    m.add_function(wrap_pyfunction!(estimate_pca_entropy, m)?)?;
     m.add_function(wrap_pyfunction!(
         estimate_coordinate_quasi_harmonic_entropy,
         m

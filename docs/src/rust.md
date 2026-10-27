@@ -80,3 +80,5 @@ println!("{} = {} + {} + {}", result.total, result.soft, result.hard, result.cou
 ```
 
 `SoftSelection::Detect` finds soft coordinates from their basins (`basins::detect_basins`), and `estimate_joint_entropy` gives a joint nearest-neighbor estimate over up to 8 coordinates. `estimate_coordinate_split_entropy` takes the same arguments and returns each coordinate's `own` and `coupling` shares and their `total`, with the `split` they divide.
+
+`pca::estimate_pca_entropy(&frames, &masses, &PcaOptions)` is **experimental**: the PCA entropy of Cartesian frames (`frames[frame][atom]`, Å) with masses in amu; `bat_library::read_solute_frames` reads them from a topology and trajectory. See [PCA estimator (experimental)](pca.md).

@@ -17,6 +17,7 @@
 - [Split estimator](split.md)
 - [Per-coordinate entropies](per-coordinate.md)
 - [Correlated frames](correlated-frames.md)
+- [PCA estimator (experimental)](pca.md)
 
 # Results
 
