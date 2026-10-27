@@ -562,8 +562,10 @@ impl System {
         self.ring_torsions.clone()
     }
 
+    /// The internal coordinates of the selected frames, one list per
+    /// coordinate, in the order of `atoms`, `kinds` and `periods`.
     #[getter]
-    fn data(&self) -> Vec<Vec<f64>> {
+    fn internal_coordinates(&self) -> Vec<Vec<f64>> {
         self.one_d_data.clone()
     }
 

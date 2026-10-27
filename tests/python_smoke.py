@@ -187,7 +187,7 @@ def check_coordinate_options():
     phase = molentropy.load_system(top, traj)  # phase angles are the default
     assert plain.coordinates == phase.coordinates
     changed = set()
-    for index, (period, a, b) in enumerate(zip(plain.periods, plain.data, phase.data)):
+    for index, (period, a, b) in enumerate(zip(plain.periods, plain.internal_coordinates, phase.internal_coordinates)):
         if a != b:
             assert period is not None, f"phase angles changed non-torsion {index}"
             changed.add(index)
@@ -215,7 +215,8 @@ def check_coordinate_options():
     assert linear != phase.estimate_entropy()
     assert molentropy.estimate_entropy(phase, periodic=False) == linear
     assert any(p is not None for p in phase.periods)
-    array = np.array(phase.data)
+    assert not hasattr(phase, "data"), "System.data was renamed internal_coordinates"
+    array = np.array(phase.internal_coordinates)
     assert molentropy.estimate_entropy(array, periodic=False) == molentropy.estimate_entropy(array)
     try:
         molentropy.estimate_entropy(array, periods=phase.periods, periodic=False)
