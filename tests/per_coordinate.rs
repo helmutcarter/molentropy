@@ -16,7 +16,8 @@ use molentropy::split::{
 use molentropy::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_entropy,
     estimate_coordinate_mist_entropy, estimate_coordinate_mutual_information,
-    estimate_joint_entropy, estimate_mist_entropy,
+    estimate_coordinate_network_entropy, estimate_joint_entropy, estimate_mist_entropy,
+    estimate_network_entropy,
 };
 
 const TORSION: CoordinateMetric = CoordinateMetric::Periodic { period: TAU };
@@ -174,6 +175,36 @@ fn mist_shares_take_half_of_each_tree_link() {
     }
     let total = estimate_mist_entropy(&data, n, &options(&metrics)).unwrap();
     assert!(close(shares.iter().sum(), total, 1e-12));
+}
+
+#[test]
+fn network_shares_sum_to_the_network_entropy() {
+    // A collider, x3 = x1 + x2 + noise, so the third coordinate takes two parents.
+    let mut rng = Rng::new(305);
+    let n = 3000;
+    let x1 = rng.normal_vec(n, 0.0, 1.0);
+    let x2 = rng.normal_vec(n, 0.0, 1.0);
+    let x3: Vec<f64> = x1
+        .iter()
+        .zip(&x2)
+        .map(|(a, b)| 0.6 * (a + b) + 0.5 * rng.normal())
+        .collect();
+    let data = vec![x1, x2, x3];
+    let metrics = [LINEAR; 3];
+    let one = estimate_coordinate_network_entropy(&data, n, 1, &options(&metrics)).unwrap();
+    let mist = estimate_coordinate_mist_entropy(&data, n, &options(&metrics)).unwrap();
+    for i in 0..3 {
+        assert!(
+            close(one[i], mist[i], 1e-12),
+            "{i}: {} vs {}",
+            one[i],
+            mist[i]
+        );
+    }
+    let shares = estimate_coordinate_network_entropy(&data, n, 2, &options(&metrics)).unwrap();
+    let total = estimate_network_entropy(&data, n, 2, &options(&metrics)).unwrap();
+    assert!(close(shares.iter().sum(), total, 1e-12));
+    assert!(total < estimate_mist_entropy(&data, n, &options(&metrics)).unwrap());
 }
 
 // ---------------------------------------------------------------------------

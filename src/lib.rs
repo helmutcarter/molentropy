@@ -24,6 +24,10 @@
 //!   the same nearest-neighbor terms as MIE-2, keeping only the strongest
 //!   pairwise dependences, so it cannot overcount them when many coordinates
 //!   are coupled.
+//! - **Bayesian network**, [`estimate_network_entropy`]: MIST with each
+//!   coordinate conditioned on up to several earlier ones instead of one, from
+//!   joint nearest-neighbor terms; captures dependence among three or more
+//!   coordinates, as in structured peptides.
 //! - **Split**, [`split::estimate_split_entropy`]: soft torsions (about
 //!   rotatable bonds) by a nearest-neighbor estimate, the stiff coordinates by
 //!   a Gaussian, plus a coupling term; for molecules with several coupled
@@ -755,23 +759,39 @@ fn mist_tree(
     options: &EntropyOptions,
 ) -> Result<(Vec<f64>, Vec<TreeLink>), String> {
     let (one_d_data, metrics) = resolve_input(one_d_data, frames_end, options)?;
+    let (entropies, links, _) = spanning_tree(&one_d_data, &metrics, options)?;
+    Ok((entropies, links))
+}
+
+/// The marginal entropies, the spanning-tree links, and the pairwise mutual
+/// information as a dense row-major matrix (empty for one coordinate).
+type SpanningTree = (Vec<f64>, Vec<TreeLink>, Vec<f64>);
+
+/// [`mist_tree`] on resolved input, also returning the pairwise mutual
+/// information.
+fn spanning_tree(
+    one_d_data: &[Vec<f64>],
+    metrics: &[CoordinateMetric],
+    options: &EntropyOptions,
+) -> Result<SpanningTree, String> {
     let entropies = coordinate_entropy_impl(
-        &one_d_data,
-        &metrics,
+        one_d_data,
+        metrics,
         options.constant,
         options.theiler_window,
     )?;
     let dimensions = entropies.len();
     let mut links = Vec::with_capacity(dimensions.saturating_sub(1));
+    let mut mutual_information = Vec::new();
     if dimensions > 1 {
         let pairs = coordinate_mutual_information_impl(
-            &one_d_data,
-            &metrics,
+            one_d_data,
+            metrics,
             options.constant,
             options.theiler_window,
             &entropies,
         )?;
-        let mut mutual_information = vec![0.0; dimensions * dimensions];
+        mutual_information = vec![0.0; dimensions * dimensions];
         let mut pair = 0;
         for i in 0..dimensions {
             for j in (i + 1)..dimensions {
@@ -802,7 +822,165 @@ fn mist_tree(
             }
         }
     }
-    Ok((entropies, links))
+    Ok((entropies, links, mutual_information))
+}
+
+/// Parents per coordinate of the default Bayesian network
+/// ([`estimate_network_entropy`]).
+pub const DEFAULT_NETWORK_PARENTS: usize = 5;
+
+/// How many earlier coordinates, those of highest pairwise mutual information,
+/// are tried as each coordinate's parents in [`estimate_network_entropy`].
+pub const NETWORK_CANDIDATES: usize = 10;
+
+/// Entropy by a Bayesian network over the coordinates: H(X_1) plus the sum of
+/// H(X_i | parents of X_i), a chain rule truncated to up to `parents` parents
+/// per coordinate.
+///
+/// The coordinates are taken in the order the MIST spanning tree adds them
+/// ([`estimate_mist_entropy`]). Each coordinate's first parent is its tree
+/// link, so with one parent this is MIST. Further parents are added greedily
+/// from the [`NETWORK_CANDIDATES`] earlier coordinates of highest pairwise
+/// mutual information with it: at each step the candidate that lowers the
+/// conditional entropy most, while any lowers it. The conditional entropies
+/// are differences of joint nearest-neighbor entropies of up to `parents + 1`
+/// coordinates, so `parents` is at most `MAX_JOINT_DIMENSION - 1`.
+///
+/// With exact terms it is an upper bound on the joint entropy, never above
+/// MIST: conditioning on more coordinates cannot raise an entropy. It captures
+/// dependence among three or more coordinates that a tree of pairs misses,
+/// such as the cooperative backbone and side-chain torsions of a structured
+/// peptide, at the cost of joint estimates in up to `parents + 1` dimensions.
+pub fn estimate_network_entropy(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    parents: usize,
+    options: &EntropyOptions,
+) -> Result<f64, String> {
+    let terms = network_terms(one_d_data, frames_end, parents, options)?;
+    Ok(terms.iter().map(|term| term.conditional).sum())
+}
+
+/// Each coordinate's share of [`estimate_network_entropy`]: its marginal
+/// entropy, minus half of the mutual information between it and its parents,
+/// minus an equal part of the other half for each coordinate it is a parent
+/// of. With one parent this is [`estimate_coordinate_mist_entropy`]. The
+/// shares sum to the network entropy.
+pub fn estimate_coordinate_network_entropy(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    parents: usize,
+    options: &EntropyOptions,
+) -> Result<Vec<f64>, String> {
+    let terms = network_terms(one_d_data, frames_end, parents, options)?;
+    let mut shares: Vec<f64> = terms.iter().map(|term| term.marginal).collect();
+    for (coordinate, term) in terms.iter().enumerate() {
+        let mutual_information = term.marginal - term.conditional;
+        shares[coordinate] -= 0.5 * mutual_information;
+        for &parent in &term.parents {
+            shares[parent] -= 0.5 * mutual_information / term.parents.len() as f64;
+        }
+    }
+    Ok(shares)
+}
+
+/// One coordinate of the Bayesian network.
+struct NetworkTerm {
+    /// H(X_i).
+    marginal: f64,
+    /// H(X_i | parents), or H(X_i) for the first coordinate.
+    conditional: f64,
+    parents: Vec<usize>,
+}
+
+/// The network's term for every coordinate, indexed by coordinate.
+fn network_terms(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    parents: usize,
+    options: &EntropyOptions,
+) -> Result<Vec<NetworkTerm>, String> {
+    if !(1..MAX_JOINT_DIMENSION).contains(&parents) {
+        return Err(format!(
+            "a Bayesian network supports 1 to {} parents per coordinate, got {parents}",
+            MAX_JOINT_DIMENSION - 1
+        ));
+    }
+    let (one_d_data, metrics) = resolve_input(one_d_data, frames_end, options)?;
+    let (entropies, links, mutual_information) = spanning_tree(&one_d_data, &metrics, options)?;
+    let dimensions = entropies.len();
+    let mut terms: Vec<NetworkTerm> = entropies
+        .iter()
+        .map(|&marginal| NetworkTerm {
+            marginal,
+            conditional: marginal,
+            parents: Vec::new(),
+        })
+        .collect();
+    let mut order = vec![0];
+    order.extend(links.iter().map(|link| link.1));
+    // Joint entropy of a set of coordinates; single coordinates reuse the marginals.
+    let joint = |set: &[usize]| -> Result<f64, String> {
+        if let [one] = set {
+            return Ok(entropies[*one]);
+        }
+        let columns: Vec<&[f64]> = set.iter().map(|&i| one_d_data[i].as_slice()).collect();
+        let set_metrics: Vec<CoordinateMetric> = set.iter().map(|&i| metrics[i]).collect();
+        let distances = calc_joint_nn_dynamic(&columns, &set_metrics, options.theiler_window)?;
+        let constant = entropy_constant_with_convention(
+            frames_end,
+            set.len(),
+            options.constant,
+            options.theiler_window,
+        )?;
+        Ok(estimate_entropy_efficient(
+            distances * set.len() as f64,
+            (frames_end as f64).recip(),
+            constant,
+        ))
+    };
+    let chosen: Vec<(f64, Vec<usize>)> = links
+        .par_iter()
+        .enumerate()
+        .map(|(position, &(tree_parent, coordinate, link))| {
+            let mut set = vec![tree_parent];
+            let mut conditional = entropies[coordinate] - link;
+            let mut candidates: Vec<usize> = order[..=position]
+                .iter()
+                .copied()
+                .filter(|&c| c != tree_parent)
+                .collect();
+            let strength = |c: usize| mutual_information[coordinate * dimensions + c];
+            candidates.sort_by(|&a, &b| strength(b).total_cmp(&strength(a)).then(a.cmp(&b)));
+            candidates.truncate(NETWORK_CANDIDATES);
+            while set.len() < parents {
+                let mut best: Option<(usize, f64)> = None;
+                for &candidate in candidates.iter().filter(|c| !set.contains(c)) {
+                    let mut with = set.clone();
+                    with.push(candidate);
+                    let given = joint(&with)?;
+                    with.push(coordinate);
+                    let value = joint(&with)? - given;
+                    if best.is_none_or(|(_, v)| value < v) {
+                        best = Some((candidate, value));
+                    }
+                }
+                match best {
+                    Some((candidate, value)) if value < conditional => {
+                        set.push(candidate);
+                        conditional = value;
+                    }
+                    _ => break,
+                }
+            }
+            Ok((conditional, set))
+        })
+        .collect::<Result<_, String>>()?;
+    for (&(_, coordinate, _), (conditional, set)) in links.iter().zip(chosen) {
+        terms[coordinate].conditional = conditional;
+        terms[coordinate].parents = set;
+    }
+    Ok(terms)
 }
 
 fn coordinate_mutual_information_impl(

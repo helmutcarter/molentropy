@@ -2,7 +2,7 @@
 
 Every estimator in the crate is biased at a finite number of frames:
 
-- **Nearest-neighbor terms** (NN MIE, MIST, the joint estimate, BQH's marginals): the bias grows with the dimension of each term, so it is small for MIE-2's one- and two-dimensional terms and larger for the joint estimate over many coordinates.
+- **Nearest-neighbor terms** (NN MIE, MIST, the Bayesian network, the joint estimate, BQH’s marginals): the bias grows with the dimension of each term, so it is small for MIE-2's one- and two-dimensional terms and larger for the joint estimate over many coordinates.
 - **Gaussian terms** (QH, the correlation term of BQH, the split estimator's hard set and coupling): a mutual information between p and q correlated columns estimated from n frames is biased downward by about pq/2n. For the split estimator's coupling term on chignolin (50 soft torsions with three harmonics each, and about 375 hard coordinates), this was 1.9 nats at 30,000 frames and 15 nats at 3,750.
 
 The entropy of one ensemble is therefore rarely converged in the number of frames. On chignolin with MIST soft entropies, each end state's estimate rose by about 57 nats between 1,875 and 30,000 frames.

@@ -8,6 +8,7 @@ use std::f64::consts::TAU;
 use common::Rng;
 use molentropy::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_entropy,
+    estimate_coordinate_network_entropy, estimate_network_entropy,
 };
 
 const FRAMES: usize = 200;
@@ -70,6 +71,29 @@ fn mie_results_do_not_depend_on_threads_or_runs() {
                     "order {order}, {threads} threads: {a} vs {b}"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn network_results_do_not_depend_on_threads_or_runs() {
+    let (data, metrics) = system(24);
+    let options = EntropyOptions {
+        metrics: Some(&metrics),
+        ..Default::default()
+    };
+    let estimate = || {
+        (
+            estimate_network_entropy(&data, FRAMES, 3, &options).unwrap(),
+            estimate_coordinate_network_entropy(&data, FRAMES, 3, &options).unwrap(),
+        )
+    };
+    let (total, shares) = with_threads(1, estimate);
+    for threads in [2, 3, 8, 8, 8] {
+        let (other_total, other_shares) = with_threads(threads, estimate);
+        assert_eq!(total.to_bits(), other_total.to_bits(), "{threads} threads");
+        for (a, b) in shares.iter().zip(&other_shares) {
+            assert_eq!(a.to_bits(), b.to_bits(), "{threads} threads: {a} vs {b}");
         }
     }
 }

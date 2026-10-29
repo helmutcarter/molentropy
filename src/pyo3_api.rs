@@ -257,6 +257,7 @@ impl SplitArguments {
         min_state_frames: usize,
         histogram_bins: Option<usize>,
         periodic_correlation: &str,
+        network_parents: usize,
     ) -> PyResult<Self> {
         let invalid = |name: &str, allowed: &str, got: &str| {
             pyo3::exceptions::PyValueError::new_err(format!(
@@ -266,8 +267,17 @@ impl SplitArguments {
         let soft_estimator = match soft_estimator {
             "mie" => SoftEstimator::NearestNeighborMie { order: mie_order },
             "mist" => SoftEstimator::MutualInformationSpanningTree,
+            "network" => SoftEstimator::BayesianNetwork {
+                parents: network_parents,
+            },
             "joint" => SoftEstimator::JointNearestNeighbor,
-            other => return Err(invalid("soft_estimator", "'mie', 'mist' or 'joint'", other)),
+            other => {
+                return Err(invalid(
+                    "soft_estimator",
+                    "'mie', 'mist', 'network' or 'joint'",
+                    other,
+                ));
+            }
         };
         let hard_estimator = match hard_estimator {
             "qh" => HardEstimator::QuasiHarmonic,
@@ -684,7 +694,7 @@ impl System {
     /// Split entropy; see the module function of the same name. `soft=None`
     /// uses the System's soft torsions.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="harmonics", harmonics=None, state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periodic=true, exact_constant=false, theiler_window=0, per_coordinate=false))]
+    #[pyo3(signature = (soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="harmonics", harmonics=None, state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periodic=true, exact_constant=false, theiler_window=0, per_coordinate=false, network_parents=5))]
     fn estimate_split_entropy(
         &self,
         py: Python<'_>,
@@ -704,6 +714,7 @@ impl System {
         exact_constant: bool,
         theiler_window: usize,
         per_coordinate: bool,
+        network_parents: usize,
     ) -> PyResult<PyObject> {
         let arguments = SplitArguments::new(
             soft,
@@ -718,6 +729,7 @@ impl System {
             min_state_frames,
             histogram_bins,
             periodic_correlation,
+            network_parents,
         )?;
         let metrics = self.metrics_for(periodic);
         let result = py.allow_threads(|| {
@@ -929,7 +941,7 @@ fn estimate_coordinate_quasi_harmonic_entropy(
 /// "detect", or a list of coordinate indices from 0; None means "topology"
 /// for a System and "detect" for an array.
 #[allow(clippy::too_many_arguments)]
-#[pyfunction(signature = (data, soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="harmonics", harmonics=None, state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periods=None, periodic=true, exact_constant=false, theiler_window=0, per_coordinate=false))]
+#[pyfunction(signature = (data, soft=None, soft_estimator="mie", mie_order=2, hard_estimator="qh", coupling="gaussian", soft_features="harmonics", harmonics=None, state_coordinates=None, state_labels=None, min_state_frames=300, histogram_bins=None, periodic_correlation="centered", periods=None, periodic=true, exact_constant=false, theiler_window=0, per_coordinate=false, network_parents=5))]
 fn estimate_split_entropy(
     py: Python<'_>,
     data: &Bound<'_, PyAny>,
@@ -950,6 +962,7 @@ fn estimate_split_entropy(
     exact_constant: bool,
     theiler_window: usize,
     per_coordinate: bool,
+    network_parents: usize,
 ) -> PyResult<PyObject> {
     if let Ok(system) = data.extract::<PyRef<'_, System>>() {
         if periods.is_some() {
@@ -975,6 +988,7 @@ fn estimate_split_entropy(
             exact_constant,
             theiler_window,
             per_coordinate,
+            network_parents,
         );
     }
     let arguments = SplitArguments::new(
@@ -990,6 +1004,7 @@ fn estimate_split_entropy(
         min_state_frames,
         histogram_bins,
         periodic_correlation,
+        network_parents,
     )?;
     let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
     let result = py.allow_threads(|| {
