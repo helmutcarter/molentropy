@@ -10,6 +10,11 @@ change the API or the default estimates.
   `--soft-estimator network`, `soft_estimator="network"`): MIST with each
   coordinate conditioned on up to several earlier ones (5 by default) instead
   of one. On peptides it halves MIST's error; see the validation page.
+- Truncated Gaussian hard estimators for the split estimator
+  (`--hard-estimator qh-mie1|qh-mie2`, `hard_estimator="qh-mie1"|"qh-mie2"`,
+  `HardEstimator::QuasiHarmonicMie1|QuasiHarmonicMie2`): QH with its
+  correlation term dropped (first order) or truncated at second order in the
+  mutual information expansion.
 
 ## [0.1.0] - 2026-10-26
 
