@@ -5,7 +5,7 @@ Multi-basin torsions are poorly described by a Gaussian, while bonds, angles and
 S = S<sub>soft</sub> + S<sub>hard</sub> + coupling
 
 - **S<sub>soft</sub>**: the nearest-neighbor MIE over the soft coordinates (`--soft-estimator mie`, the default; `--mie-order` sets the order), the mutual information spanning tree (`mist`), MIST extended to several parents per coordinate (`network`; `--network-parents` sets how many, default 5; see [NN MIE](nn-mie.md)), or one joint nearest-neighbor estimate over all of them (`joint`, up to 8 soft coordinates). MIST uses the same single and pairwise nearest-neighbor entropies as MIE-2, but subtracts only the pairwise mutual information along the maximum spanning tree of the soft coordinates: one dependence per coordinate, the strongest that keeps the tree connected. With exact terms it is an upper bound on the joint entropy, while MIE-2 can fall far below it when many torsions are coupled.
-- **S<sub>hard</sub>**: the quasi-harmonic entropy of the hard coordinates over all frames (`--hard-estimator qh`, the default), or BQH (`bqh`). Hard phase angles are centered on their circular mean (`--periodic-correlation centered`, the split default).
+- **S<sub>hard</sub>**: the quasi-harmonic entropy of the hard coordinates over all frames (`--hard-estimator qh`, the default), BQH (`bqh`), or QH truncated at first (`qh-mie1`) or second order (`qh-mie2`) in the mutual information expansion (see [below](#truncated-gaussian-hard-entropy)). Hard phase angles are centered on their circular mean (`--periodic-correlation centered`, the split default).
 - **Coupling**: the dependence between the two sets, at most 0 up to sampling error. See [Coupling](#coupling).
 
 The output lists each term before the total. Add ⟨ln J⟩ for a Cartesian entropy, as for every estimator.
@@ -41,6 +41,16 @@ No mixing term is added: the entropy of moving between states is already part of
 5. Merge basins holding less than 2% of the frames into a neighbor.
 
 The result is deterministic and does not depend on where the period starts.
+
+## Truncated Gaussian hard entropy
+
+`--hard-estimator qh-mie1` (`hard_estimator="qh-mie1"`, `HardEstimator::QuasiHarmonicMie1`) keeps only QH's first-order term, the Gaussian entropy of each hard coordinate, Σ<sub>i</sub> ½ ln(2πe σ<sub>i</sub>²): the hard coordinates as independent Gaussians, with no correlation term. It is an upper bound on the QH hard entropy, since ½ ln|C| ≤ 0. It shows how much the hard correlations contribute; it is not a more accurate hard entropy. On alanine dipeptide ½ ln|C| was −1.68 nats at λ = 0 and −2.04 at λ = 1, so dropping it lowers S0 − S1 by 0.36 nats.
+
+`--hard-estimator qh-mie2` (`hard_estimator="qh-mie2"`, `HardEstimator::QuasiHarmonicMie2`) keeps QH's Gaussian entropy of each hard coordinate but replaces its correlation term ½ ln|C| with the second-order mutual information expansion, the Gaussian mutual information of each pair subtracted once:
+
+S<sub>hard</sub> = Σ<sub>i</sub> ½ ln(2πe σ<sub>i</sub>²) + ½ Σ<sub>i&lt;j</sub> ln(1 − ρ<sub>ij</sub>²)
+
+where ρ<sub>ij</sub> is the correlation of hard coordinates i and j (its modulus with `--periodic-correlation complex`). This is the MIE-2 of the soft set with Gaussian terms. For Gaussian coordinates the full ½ ln|C| is exact, and the pairwise sum is an approximation to it: it agrees when the dependences are weak or confined to separate pairs, and misses the dependence shared among three or more coordinates. That error has either sign: the pairwise sum overcounts redundant dependences (three coordinates all correlated with one another) and undercounts synergistic ones (two independent coordinates that together determine a third). On butane the pairwise term was 0.03–0.06 nats more negative than ½ ln|C|; on alanine dipeptide (ff14SB, 41 hard coordinates) it was 0.01–0.02 less negative, and S0 − S1 moved by 0.005 nats. Use it to compare with the MIE-2 treatment of the soft set, not as a more accurate hard entropy. The coupling term is unchanged: it still uses ln|C(H)| of the whole hard set. With `--per-coordinate`, each pair's term is shared equally between its two coordinates; with `qh-mie1` each hard coordinate takes its first-order term.
 
 ## Choosing settings
 

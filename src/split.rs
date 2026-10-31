@@ -11,7 +11,8 @@
 //! - S_soft: the nearest-neighbor MIE, the mutual information spanning tree
 //!   (MIST) or a joint nearest-neighbor estimate over the soft coordinates;
 //! - S_hard: the quasi-harmonic (QH) or Boltzmann quasi-harmonic (BQH)
-//!   entropy of the hard coordinates over all frames;
+//!   entropy of the hard coordinates over all frames, or QH truncated at
+//!   second order in the mutual information expansion;
 //! - the coupling term, at most 0, for the dependence between the two sets:
 //!   either the Gaussian mutual information between them, or the change in
 //!   the hard entropy when it is computed within each conformational state of
@@ -29,7 +30,7 @@ use crate::basins::{BasinOptions, Basins, detect_basins};
 use crate::quasi_harmonic::{
     MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions, Representation,
     coordinate_quasi_harmonic_terms, correlation_log_det, correlation_log_diagonal,
-    quasi_harmonic_terms,
+    quasi_harmonic_terms, truncated_quasi_harmonic_terms,
 };
 use crate::{
     CoordinateMetric, EntropyOptions, calculate_entropy, estimate_coordinate_entropy,
@@ -103,6 +104,18 @@ pub enum HardEstimator {
     /// Each hard coordinate's own entropy from its distribution, plus the
     /// Gaussian correlation term (BQH).
     BoltzmannQuasiHarmonic,
+    /// QH truncated at first order in the mutual information expansion: the
+    /// Gaussian entropy of each hard coordinate, with no correlation term, as
+    /// if the hard coordinates were independent. The coupling to the soft
+    /// coordinates is unchanged.
+    QuasiHarmonicMie1,
+    /// QH truncated at second order in the mutual information expansion: the
+    /// Gaussian entropy of each hard coordinate, minus the Gaussian mutual
+    /// information of each pair, 1/2 ln(1 - C_ij^2), in place of the full
+    /// correlation term 1/2 ln|C|. For Gaussian coordinates the full term is
+    /// exact; the pairwise one misses the dependence shared among three or more
+    /// coordinates, and can be too high or too low.
+    QuasiHarmonicMie2,
 }
 
 /// How soft torsions enter the Gaussian coupling term.
@@ -316,7 +329,10 @@ pub struct CoordinateSplitEntropy {
 ///   estimate has no such split and is refused.
 /// - Hard coordinates take their shares of the QH or BQH entropy as
 ///   [`estimate_coordinate_quasi_harmonic_entropy`](crate::quasi_harmonic::estimate_coordinate_quasi_harmonic_entropy)
-///   gives them: first-order term plus 1/2 (log C)_ii.
+///   gives them: first-order term plus 1/2 (log C)_ii. With
+///   [`HardEstimator::QuasiHarmonicMie1`] each takes its first-order term
+///   only; with [`HardEstimator::QuasiHarmonicMie2`], each pair's
+///   1/2 ln(1 - C_ij^2) is shared equally between its two coordinates instead.
 /// - The Gaussian coupling 1/2 [ln|C(S+H)| - ln|C(S)| - ln|C(H)|] is shared
 ///   the same way: coordinate i receives 1/2 [(log C(S+H))_ii - (log C(S))_ii]
 ///   if soft, with C(H) if hard, summed over its entries (two per harmonic of
@@ -469,8 +485,18 @@ fn split_parts(
     // The hard entropy of some frames, and with `want_shares` each hard
     // coordinate's share of it.
     let hard_entropy = |data: &[Vec<f64>], frames: usize| -> Result<HardParts, String> {
-        let boltzmann = split.hard_estimator == HardEstimator::BoltzmannQuasiHarmonic;
         let hard_options = with_metrics(options, &hard_metrics);
+        let truncation = match split.hard_estimator {
+            HardEstimator::QuasiHarmonicMie1 => Some(1),
+            HardEstimator::QuasiHarmonicMie2 => Some(2),
+            _ => None,
+        };
+        if let Some(order) = truncation {
+            let (total, shares) =
+                truncated_quasi_harmonic_terms(data, frames, &split.hard, &hard_options, order)?;
+            return Ok((total, want_shares.then_some(shares)));
+        }
+        let boltzmann = split.hard_estimator == HardEstimator::BoltzmannQuasiHarmonic;
         let terms = quasi_harmonic_terms(data, frames, &split.hard, &hard_options, boltzmann)?;
         let total = if boltzmann {
             terms.boltzmann_quasi_harmonic
