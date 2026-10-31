@@ -116,7 +116,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         fail(format!(
-            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|network|joint] [--network-parents N] [--hard-estimator qh|bqh] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]",
+            "Usage: {} <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|network|joint] [--network-parents N] [--hard-estimator qh|bqh|qh-mie1|qh-mie2] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]",
             args[0]
         ));
     }
@@ -264,6 +264,8 @@ fn main() {
                     &[
                         ("qh", HardEstimator::QuasiHarmonic),
                         ("bqh", HardEstimator::BoltzmannQuasiHarmonic),
+                        ("qh-mie1", HardEstimator::QuasiHarmonicMie1),
+                        ("qh-mie2", HardEstimator::QuasiHarmonicMie2),
                     ],
                 ));
                 i += 2;

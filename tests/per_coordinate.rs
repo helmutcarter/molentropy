@@ -279,6 +279,15 @@ fn split_shares_sum_to_each_term_for_every_supported_setting() {
     let mut none = base;
     none.coupling = Coupling::None;
     settings.push(none);
+    let mut pairwise = base;
+    pairwise.hard_estimator = HardEstimator::QuasiHarmonicMie2;
+    settings.push(pairwise);
+    let mut first_order = base;
+    first_order.hard_estimator = HardEstimator::QuasiHarmonicMie1;
+    settings.push(first_order);
+    let mut pairwise_states = states;
+    pairwise_states.hard_estimator = HardEstimator::QuasiHarmonicMie2;
+    settings.push(pairwise_states);
 
     for setting in &settings {
         let shares =

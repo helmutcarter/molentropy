@@ -282,7 +282,15 @@ impl SplitArguments {
         let hard_estimator = match hard_estimator {
             "qh" => HardEstimator::QuasiHarmonic,
             "bqh" => HardEstimator::BoltzmannQuasiHarmonic,
-            other => return Err(invalid("hard_estimator", "'qh' or 'bqh'", other)),
+            "qh-mie1" => HardEstimator::QuasiHarmonicMie1,
+            "qh-mie2" => HardEstimator::QuasiHarmonicMie2,
+            other => {
+                return Err(invalid(
+                    "hard_estimator",
+                    "'qh', 'bqh', 'qh-mie1' or 'qh-mie2'",
+                    other,
+                ));
+            }
         };
         if !["gaussian", "states", "none"].contains(&coupling) {
             return Err(invalid(
