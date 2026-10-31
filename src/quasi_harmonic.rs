@@ -198,6 +198,51 @@ pub(crate) fn coordinate_quasi_harmonic_terms(
     })
 }
 
+/// QH truncated at first or second order in the mutual information expansion,
+/// and each coordinate's share of it.
+///
+/// The first-order term is QH's, sum over i of 1/2 ln(2 pi e sigma_ii): the
+/// hard coordinates as independent Gaussians. At first order the correlation
+/// term 1/2 ln|C| is dropped. At second order it is replaced by its pairwise
+/// expansion, 1/2 sum over i < j of ln(1 - |C_ij|^2), minus the Gaussian
+/// mutual information of each pair. For a Gaussian the full term is exact and
+/// this is an approximation to it, which misses the dependence shared among
+/// three or more coordinates: it overcounts redundant dependences (three
+/// coordinates all correlated with one another) and undercounts synergistic
+/// ones (two independent coordinates that together determine a third). Each
+/// pair's term is shared equally between its two coordinates, as in the MIE.
+///
+/// The same conditions apply as for [`estimate_quasi_harmonic_entropy`], except
+/// that only each pair, not the whole correlation matrix, must be nonsingular.
+pub(crate) fn truncated_quasi_harmonic_terms(
+    one_d_data: &[Vec<f64>],
+    frames_end: usize,
+    quasi_harmonic: &QuasiHarmonicOptions,
+    options: &EntropyOptions,
+    order: usize,
+) -> Result<(f64, Vec<f64>), String> {
+    debug_assert!(order == 1 || order == 2, "order {order}");
+    let terms = terms(one_d_data, frames_end, quasi_harmonic, options, false)?;
+    let mut shares = terms.first_order_gaussian;
+    if order == 2 {
+        let tolerance = singular_tolerance(2);
+        for (i, row) in terms.correlation.iter().enumerate() {
+            for (j, &(real, imaginary)) in row.iter().enumerate().skip(i + 1) {
+                let unexplained = 1.0 - (real * real + imaginary * imaginary);
+                if !unexplained.is_finite() || unexplained <= tolerance {
+                    return Err(format!(
+                        "coordinates {i} and {j} are perfectly correlated, so their pairwise mutual information is infinite"
+                    ));
+                }
+                let half_pair = 0.25 * unexplained.ln();
+                shares[i] += half_pair;
+                shares[j] += half_pair;
+            }
+        }
+    }
+    Ok((shares.iter().sum(), shares))
+}
+
 /// The per-coordinate first-order terms and the correlation matrix.
 struct Terms {
     first_order_gaussian: Vec<f64>,

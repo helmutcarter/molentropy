@@ -648,6 +648,161 @@ fn invalid_settings_are_refused() {
 }
 
 // ---------------------------------------------------------------------------
+// Pairwise Gaussian hard entropy
+// ---------------------------------------------------------------------------
+
+/// `n` frames of `dimensions` Gaussian coordinates with unit variance and
+/// correlation `rho` between every pair.
+fn equicorrelated(rng: &mut Rng, dimensions: usize, rho: f64, n: usize) -> Vec<Vec<f64>> {
+    let (shared, own) = (rho.sqrt(), (1.0 - rho).sqrt());
+    let mut columns = vec![Vec::with_capacity(n); dimensions];
+    for _ in 0..n {
+        let common = rng.normal();
+        for column in &mut columns {
+            column.push(shared * common + own * rng.normal());
+        }
+    }
+    columns
+}
+
+fn pairwise_hard(data: &[Vec<f64>]) -> f64 {
+    let mut settings = SplitOptions::new(SoftSelection::Indices(&[]));
+    settings.hard_estimator = HardEstimator::QuasiHarmonicMie2;
+    split(data, &vec![LINEAR; data.len()], &settings).total
+}
+
+#[test]
+fn pairwise_hard_entropy_is_the_gaussian_mie2_of_the_sample() {
+    let mut rng = Rng::new(91);
+    let data = equicorrelated(&mut rng, 4, 0.5, 5_000);
+    let n = data[0].len() as f64;
+    let mean = |v: &[f64]| v.iter().sum::<f64>() / n;
+    let moment = |a: &[f64], b: &[f64]| {
+        let (ma, mb) = (mean(a), mean(b));
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - ma) * (y - mb))
+            .sum::<f64>()
+            / n
+    };
+    let mut expected = 0.0;
+    for i in 0..data.len() {
+        expected += 0.5 * (TAU * E * moment(&data[i], &data[i])).ln();
+        for j in (i + 1)..data.len() {
+            let r2 = moment(&data[i], &data[j]).powi(2)
+                / (moment(&data[i], &data[i]) * moment(&data[j], &data[j]));
+            expected += 0.5 * (1.0 - r2).ln();
+        }
+    }
+    let got = pairwise_hard(&data);
+    assert!((got - expected).abs() < 1e-10, "{got} vs {expected}");
+}
+
+#[test]
+fn for_two_hard_coordinates_pairwise_and_full_quasi_harmonic_agree() {
+    let mut rng = Rng::new(92);
+    let data = equicorrelated(&mut rng, 2, 0.7, 3_000);
+    let metrics = [LINEAR, LINEAR];
+    let full = split(
+        &data,
+        &metrics,
+        &SplitOptions::new(SoftSelection::Indices(&[])),
+    );
+    let pairwise = pairwise_hard(&data);
+    assert!(
+        (pairwise - full.total).abs() < 1e-12,
+        "{pairwise} vs {}",
+        full.total
+    );
+}
+
+#[test]
+fn pairwise_hard_entropy_overcounts_three_mutually_correlated_coordinates() {
+    // With every pair correlated by rho, |C| = (1 - rho)^2 (1 + 2 rho), while
+    // the pairwise sum subtracts -1/2 ln(1 - rho^2) three times.
+    let rho: f64 = 0.6;
+    let mut rng = Rng::new(93);
+    let data = equicorrelated(&mut rng, 3, rho, 50_000);
+    let full = split(
+        &data,
+        &[LINEAR; 3],
+        &SplitOptions::new(SoftSelection::Indices(&[])),
+    )
+    .total;
+    let expected =
+        1.5 * (1.0 - rho * rho).ln() - 0.5 * ((1.0 - rho).powi(2) * (1.0 + 2.0 * rho)).ln();
+    let difference = pairwise_hard(&data) - full;
+    assert!(expected < -0.1);
+    assert!(
+        (difference - expected).abs() < 0.01,
+        "{difference} vs {expected}"
+    );
+}
+
+fn first_order_hard(data: &[Vec<f64>]) -> f64 {
+    let mut settings = SplitOptions::new(SoftSelection::Indices(&[]));
+    settings.hard_estimator = HardEstimator::QuasiHarmonicMie1;
+    split(data, &vec![LINEAR; data.len()], &settings).total
+}
+
+#[test]
+fn first_order_hard_entropy_is_the_sum_of_gaussian_entropies() {
+    let mut rng = Rng::new(95);
+    let data = equicorrelated(&mut rng, 4, 0.5, 5_000);
+    let n = data[0].len() as f64;
+    let expected: f64 = data
+        .iter()
+        .map(|v| {
+            let mean = v.iter().sum::<f64>() / n;
+            let variance = v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
+            0.5 * (TAU * E * variance).ln()
+        })
+        .sum();
+    let got = first_order_hard(&data);
+    assert!((got - expected).abs() < 1e-10, "{got} vs {expected}");
+}
+
+#[test]
+fn first_order_hard_entropy_exceeds_full_quasi_harmonic_by_the_correlation_term() {
+    // For equicorrelated coordinates, |C| = (1 - rho)^(d - 1) (1 + (d - 1) rho).
+    let (rho, dimensions): (f64, usize) = (0.5, 4);
+    let mut rng = Rng::new(96);
+    let data = equicorrelated(&mut rng, dimensions, rho, 50_000);
+    let full = split(
+        &data,
+        &[LINEAR; 4],
+        &SplitOptions::new(SoftSelection::Indices(&[])),
+    )
+    .total;
+    let d = dimensions as f64;
+    let expected = -0.5 * ((1.0 - rho).powf(d - 1.0) * (1.0 + (d - 1.0) * rho)).ln();
+    let difference = first_order_hard(&data) - full;
+    assert!(difference > 0.0);
+    assert!(
+        (difference - expected).abs() < 0.01,
+        "{difference} vs {expected}"
+    );
+}
+
+#[test]
+fn pairwise_hard_entropy_refuses_a_perfectly_correlated_pair() {
+    let mut rng = Rng::new(94);
+    let x = rng.uniform_vec(500, 0.0, 1.0);
+    let data = vec![
+        x.clone(),
+        x.iter().map(|v| 2.0 * v + 1.0).collect(),
+        rng.uniform_vec(500, 0.0, 1.0),
+    ];
+    let mut settings = SplitOptions::new(SoftSelection::Indices(&[]));
+    settings.hard_estimator = HardEstimator::QuasiHarmonicMie2;
+    let err = estimate_split_entropy(&data, 500, &settings, &options(&[LINEAR; 3])).unwrap_err();
+    assert!(
+        err.contains("coordinates 0 and 1 are perfectly correlated"),
+        "{err}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -663,8 +818,9 @@ mod cli {
     use molentropy::EntropyOptions;
     use molentropy::bat_library::InternalCoordinates;
     use molentropy::split::{
-        Coupling, LARGE_SOFT_SET, SoftEstimator, SoftFeatures, SoftSelection, SplitOptions,
-        StateDefinition, StateOptions, estimate_coordinate_split_entropy, estimate_split_entropy,
+        Coupling, HardEstimator, LARGE_SOFT_SET, SoftEstimator, SoftFeatures, SoftSelection,
+        SplitOptions, StateDefinition, StateOptions, estimate_coordinate_split_entropy,
+        estimate_split_entropy,
     };
 
     /// A chain molecule (three rotatable bonds) with more frames than
@@ -758,6 +914,62 @@ mod cli {
             &format!("Total entropy = {}", expected.total)
         );
         assert_eq!(numbers.len(), 3);
+    }
+
+    #[test]
+    fn first_order_hard_estimator_output_matches_the_library() {
+        let (top, traj) = chain("cli_qh_mie1");
+        let lines = lines(&run(
+            &top,
+            &traj,
+            &["--estimator", "split", "--hard-estimator", "qh-mie1"],
+        ));
+        let expected = library(&top, &traj, |settings, _| {
+            settings.hard_estimator = HardEstimator::QuasiHarmonicMie1;
+        });
+        let full = library(&top, &traj, |_, _| {});
+        assert_eq!(
+            value(&lines, "Hard entropy").parse::<f64>().unwrap(),
+            expected.hard
+        );
+        assert_eq!(
+            lines.last().unwrap(),
+            &format!("Total entropy = {}", expected.total)
+        );
+        // Only the hard term changes, and dropping the correlation term raises it.
+        assert_eq!(
+            (expected.soft, expected.coupling),
+            (full.soft, full.coupling)
+        );
+        assert!(expected.hard > full.hard);
+    }
+
+    #[test]
+    fn pairwise_hard_estimator_output_matches_the_library() {
+        let (top, traj) = chain("cli_qh_mie2");
+        let lines = lines(&run(
+            &top,
+            &traj,
+            &["--estimator", "split", "--hard-estimator", "qh-mie2"],
+        ));
+        let expected = library(&top, &traj, |settings, _| {
+            settings.hard_estimator = HardEstimator::QuasiHarmonicMie2;
+        });
+        let full = library(&top, &traj, |_, _| {});
+        assert_eq!(
+            value(&lines, "Hard entropy").parse::<f64>().unwrap(),
+            expected.hard
+        );
+        assert_eq!(
+            lines.last().unwrap(),
+            &format!("Total entropy = {}", expected.total)
+        );
+        // Only the hard term changes.
+        assert_eq!(
+            (expected.soft, expected.coupling),
+            (full.soft, full.coupling)
+        );
+        assert_ne!(expected.hard, full.hard);
     }
 
     #[test]
