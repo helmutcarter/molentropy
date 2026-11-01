@@ -6,6 +6,13 @@ change the API or the default estimates.
 
 ## [Unreleased]
 
+- Constrained-coordinate detection (`--drop-constrained`,
+  `drop_constrained=True` in `load_system`,
+  `CoordinateOptions::drop_constrained`): drops every bond and angle that the
+  trajectory shows to be constrained, keeps free bonds to hydrogen, and keeps
+  the dropped coordinates' terms in the BAT Jacobian, so one run gives both
+  the entropy and ln J. `System.constrained_atoms` and
+  `InternalCoordinates::constrained_coordinates` list what was dropped.
 - A Bayesian network soft estimator (`estimate_network_entropy`,
   `--soft-estimator network`, `soft_estimator="network"`): MIST with each
   coordinate conditioned on up to several earlier ones (5 by default) instead
