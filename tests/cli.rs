@@ -240,6 +240,42 @@ fn coordinate_flags_reach_the_coordinates_and_the_jacobian() {
 }
 
 #[test]
+fn drop_constrained_reports_the_dropped_coordinates() {
+    let output = run_cli(&["--drop-constrained"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 2, "unexpected output: {stdout}");
+    let options = CoordinateOptions {
+        drop_constrained: true,
+        ..Default::default()
+    };
+    let mut internal =
+        InternalCoordinates::with_options(&fixture("tests/fixtures/test.parm7"), options).unwrap();
+    internal
+        .calculate_internal_coords(&fixture("tests/fixtures/test.nc"), usize::MAX, false)
+        .unwrap();
+    assert_eq!(
+        lines[0],
+        format!(
+            "Constrained coordinates dropped = {}",
+            internal.constrained_coordinates().len()
+        )
+    );
+    assert!(lines[1].starts_with("Total entropy = "));
+}
+
+#[test]
+fn drop_constrained_cannot_be_combined_with_legacy() {
+    let output = run_cli(&["--legacy", "--drop-constrained"]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("--drop-constrained cannot be combined with --legacy")
+    );
+}
+
+#[test]
 fn default_output_is_only_the_entropy() {
     let output = run_cli(&[]);
     assert!(output.status.success());

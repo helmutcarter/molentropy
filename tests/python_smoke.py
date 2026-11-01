@@ -228,6 +228,12 @@ def check_coordinate_options():
     tree = molentropy.load_system(top, traj, tree_bonds=True, phase_angles=True)
     assert tree.coordinates > plain.coordinates, "tree bonds should add X-H bonds"
     assert math.isfinite(tree.mean_log_jacobian)
+    dropping = molentropy.load_system(
+        top, traj, tree_bonds=True, phase_angles=True, drop_constrained=True
+    )
+    assert dropping.coordinates + len(dropping.constrained_atoms) == tree.coordinates
+    assert math.isclose(dropping.mean_log_jacobian, tree.mean_log_jacobian, rel_tol=1e-12)
+    assert plain.constrained_atoms == []
     print(
         f"coordinate options: {len(changed)} phase angles, "
         f"mean ln J {tree.mean_log_jacobian!r}"
