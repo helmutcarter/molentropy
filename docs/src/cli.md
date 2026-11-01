@@ -1,7 +1,7 @@
 # Command line
 
 ```bash
-cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--no-phase-angles] [--jacobian] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|network|joint] [--network-parents N] [--hard-estimator qh|bqh|qh-mie1|qh-mie2] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]
+cargo run --release <path_to_parm7> <path_to_nc> [--torsions-only] [--no-periodic] [--exact-constant] [--start N] [--stop N] [--stride N] [--mie-order 1|2|3|4] [--theiler-window W] [--tree-bonds] [--drop-constrained] [--no-phase-angles] [--jacobian] [--estimator nn|qh|bqh|split] [--histogram-bins N] [--periodic-correlation complex|centered] [--per-coordinate] [--mutual-information] [--soft topology|detect|LIST] [--soft-estimator mie|mist|network|joint] [--network-parents N] [--hard-estimator qh|bqh|qh-mie1|qh-mie2] [--coupling gaussian|states|none] [--soft-features complex|cossin|harmonics] [--harmonics N] [--state-torsions auto|LIST] [--min-state-frames N]
 ```
 
 Example:
@@ -21,7 +21,8 @@ cargo run --release <path_to_parm7> <path_to_nc>
 - `--no-periodic` forces every coordinate to use an ordinary linear metric. This produces a significant speedup, but the torsion entropy contribution loses some correctness.
 - `--theiler-window W` excludes temporally adjacent frames from the nearest-neighbor search: frame i's neighbor must satisfy |i - j| > W, counted in frames after `--start` and `--stride`. The default, 0, is the plain estimator. See [Correlated frames](correlated-frames.md).
 - `--exact-constant` uses the exact finite-sample term `psi(N) - psi(1) = H_(N-1)`. The default is the common approximation `ln(N) + EulerGamma`.
-- `--tree-bonds` uses the bonds of the BAT spanning tree, including bonds to hydrogen and excluding ring closures, in place of every heavy-atom bond. Use it only for trajectories without constrained bonds to hydrogen; see [Choosing the bond set](coordinates.md#choosing-the-bond-set).
+- `--tree-bonds` uses the bonds of the BAT spanning tree, including bonds to hydrogen and excluding ring closures, in place of every heavy-atom bond. Use it only for trajectories without constrained bonds to hydrogen, or with `--drop-constrained`; see [Choosing the bond set](coordinates.md#choosing-the-bond-set).
+- `--drop-constrained` drops every bond and angle the trajectory shows to be constrained (relative standard deviation below 10⁻³ over the frames read) and prints `Constrained coordinates dropped = N` first. With the default bonds, bonds to hydrogen are then kept unless constrained; with `--tree-bonds`, the constrained tree bonds go but still count in `--jacobian`. See [Constrained coordinates](coordinates.md#constrained-coordinates).
 - `--no-phase-angles` uses the raw torsions. By default each torsion that shares its central bond with an earlier torsion is replaced by its offset from that torsion. See [Coordinate sets](coordinates.md).
 - `--jacobian` also prints `Mean ln J = ...`, the mean of the log BAT Jacobian over the frames used, on the line before the entropy. It requires `--tree-bonds` and cannot be combined with `--torsions-only`.
 - With `--estimator qh` or `bqh`, two lines before the total give the terms it is the sum of: `First-order entropy = ...` and `Correlation term = ...`.

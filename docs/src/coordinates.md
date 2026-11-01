@@ -22,7 +22,17 @@ A constrained bond does not fluctuate, so as a coordinate it contributes only th
 
 The largest changes were in the alkanes, whose hydrogens make up most of the extra coordinates. For hexane, the split estimator's error went from +0.12 to −7.7 nats and BQH's from +0.06 to +10.7. For butane, the split estimator's went from +0.08 to −3.8. Without butane and hexane, the split estimator's RMS error was still 0.39 with heavy-atom bonds against 0.92 with tree bonds.
 
-The Jacobian is defined only for the tree set, so `--jacobian` and `mean_log_jacobian` need tree bonds. With constraints, compute the entropy with the default bonds and take the Jacobian from a second load with tree bonds. The constrained bonds' 2 ln b terms are then constant and cancel in a difference between ensembles.
+The Jacobian is defined only for the tree set, so `--jacobian` and `mean_log_jacobian` need tree bonds. With constraints, compute the entropy with the default bonds and take the Jacobian from a second load with tree bonds. The constrained bonds' 2 ln b terms are then constant and cancel in a difference between ensembles. With `--drop-constrained`, one run does both: see below.
+
+## Constrained coordinates
+
+`--drop-constrained` (`drop_constrained=True` in `load_system`, `CoordinateOptions::drop_constrained`) finds the constrained coordinates from the trajectory instead of assuming them from the atom types. A bond or angle is dropped when its standard deviation over the frames read is below 10⁻³ of its mean (`CONSTRAINT_TOLERANCE`). Torsions are never dropped. The two kinds are far apart: constrained bonds to hydrogen spread by at most about 10⁻⁵ of their length (Amber SHAKE, OpenMM constraints, single-precision trajectories), and free bonds and angles by about 2 × 10⁻² at 300 K, which scales with √T.
+
+- **Default bonds:** bonds to hydrogen are included and kept unless constrained. A SHAKE trajectory gives exactly the default set; an unconstrained one keeps its X-H bonds.
+- **Tree bonds:** the constrained tree bonds are dropped, and their 2 ln b terms still enter ln J, so `--tree-bonds --drop-constrained --jacobian` gives the default-bond entropy and the full Jacobian in one run.
+- **Angles:** SHAKE on bonds to hydrogen leaves every angle free; H-X-H angles fluctuate as much as heavy-atom ones. An angle is dropped only if it really is fixed, for example when all three distances of a triangle are constrained.
+
+The CLI prints the number dropped; `System.constrained_atoms` and `InternalCoordinates::constrained_coordinates` list their atoms. On butane (Amber, SHAKE) and alanine dipeptide (OpenMM, constrained X-H bonds), it dropped the 10 and 12 bonds to hydrogen and nothing else, and both the entropy and the mean ln J matched the two separate runs.
 
 ## Rotatable, ring and rotor torsions
 

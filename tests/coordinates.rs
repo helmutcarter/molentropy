@@ -1117,3 +1117,99 @@ fn a_linear_group_gives_finite_coordinates() {
         assert!(frame.iter().all(|v| v.is_finite()), "{frame:?}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Constrained coordinates
+// ---------------------------------------------------------------------------
+
+/// Ethane with every C-H bond held at 1.09 Å, as SHAKE would: each hydrogen is
+/// moved along its bond to that length, so the angles still fluctuate.
+fn shaken_ethane(name: &str) -> (PathBuf, PathBuf, Vec<Vec<[f64; 3]>>) {
+    let mut rng = Rng::new(0x5eed_e7a2);
+    let frames: Vec<Vec<[f64; 3]>> = ethane_frames(&mut rng)
+        .into_iter()
+        .map(|mut atoms| {
+            for h in 2..8 {
+                let carbon = atoms[if h < 5 { 0 } else { 1 }];
+                let bond = sub(atoms[h], carbon);
+                let scale = 1.09 / norm(bond);
+                atoms[h] = add(carbon, [bond[0] * scale, bond[1] * scale, bond[2] * scale]);
+            }
+            atoms
+        })
+        .collect();
+    write_system(name, &ETHANE_ATOMS, &ETHANE_BONDS, &frames)
+}
+
+fn load_dropping(top: &Path, traj: &Path, bonds: BondSet) -> InternalCoordinates {
+    let options = CoordinateOptions {
+        bonds,
+        drop_constrained: true,
+        ..Default::default()
+    };
+    let mut internal = InternalCoordinates::with_options(top, options).unwrap();
+    internal
+        .calculate_internal_coords(traj, usize::MAX, false)
+        .unwrap();
+    internal
+}
+
+#[test]
+fn free_bonds_to_hydrogen_are_kept_when_dropping_constrained_ones() {
+    let (top, traj, _) = ethane("constrained_free");
+    let internal = load_dropping(&top, &traj, BondSet::HeavyAtom);
+    assert!(internal.constrained_coordinates().is_empty());
+    let bonds = internal
+        .coordinate_atoms()
+        .into_iter()
+        .filter(|a| a.len() == 2)
+        .count();
+    assert_eq!(bonds, 7, "every ethane bond fluctuates");
+}
+
+#[test]
+fn constrained_bonds_to_hydrogen_are_dropped_and_angles_kept() {
+    let (top, traj, _) = shaken_ethane("constrained_shaken");
+    let dropping = load_dropping(&top, &traj, BondSet::HeavyAtom);
+    let mut dropped = dropping.constrained_coordinates();
+    dropped.sort();
+    let expected: Vec<Vec<usize>> = ETHANE_BONDS[1..].iter().map(|&(a, b)| vec![a, b]).collect();
+    assert_eq!(dropped, expected);
+    // What is left is the default set, value for value: C-C, every angle and
+    // every torsion.
+    let default = load(&top, &traj, BondSet::HeavyAtom, true, false);
+    assert_eq!(dropping.coordinate_atoms(), default.coordinate_atoms());
+    assert_eq!(dropping.int_coords, default.int_coords);
+    assert_eq!(dropping.coordinate_kinds(), default.coordinate_kinds());
+}
+
+#[test]
+fn dropped_tree_bonds_still_count_in_the_jacobian() {
+    let (top, traj, _) = shaken_ethane("constrained_jacobian");
+    let dropping = load_dropping(&top, &traj, BondSet::Tree);
+    let tree = load(&top, &traj, BondSet::Tree, true, false);
+    assert_eq!(dropping.constrained_coordinates().len(), 6);
+    assert_eq!(dropping.dim, tree.dim - 6);
+    for (a, b) in dropping
+        .log_jacobian()
+        .unwrap()
+        .iter()
+        .zip(tree.log_jacobian().unwrap())
+    {
+        assert!((a - b).abs() < 1e-12, "{a} vs {b}");
+    }
+}
+
+#[test]
+fn finding_constrained_coordinates_needs_two_frames() {
+    let (top, traj, _) = shaken_ethane("constrained_one_frame");
+    let options = CoordinateOptions {
+        drop_constrained: true,
+        ..Default::default()
+    };
+    let mut internal = InternalCoordinates::with_options(&top, options).unwrap();
+    let err = internal
+        .calculate_internal_coords(&traj, 1, false)
+        .unwrap_err();
+    assert!(err.to_string().contains("at least 2 frames"), "{err}");
+}

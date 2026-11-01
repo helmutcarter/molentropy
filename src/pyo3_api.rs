@@ -195,6 +195,7 @@ fn system_from_trajectory(
         metrics,
         mean_log_jacobian,
         atoms: internal.coordinate_atoms(),
+        constrained: internal.constrained_coordinates(),
         kinds: internal.coordinate_kinds(),
         soft_torsions: internal.soft_torsions(),
         symmetric_rotor_torsions: internal.symmetric_rotor_torsions(),
@@ -505,6 +506,7 @@ struct System {
     metrics: Vec<CoordinateMetric>,
     mean_log_jacobian: Option<f64>,
     atoms: Vec<Vec<usize>>,
+    constrained: Vec<Vec<usize>>,
     kinds: Vec<CoordinateKind>,
     soft_torsions: Vec<usize>,
     symmetric_rotor_torsions: Vec<usize>,
@@ -540,6 +542,14 @@ impl System {
     #[getter]
     fn atoms(&self) -> Vec<Vec<usize>> {
         self.atoms.clone()
+    }
+
+    /// Topology atom indices of each bond and angle dropped as constrained by
+    /// `load_system(..., drop_constrained=True)`, as in `atoms`; empty
+    /// otherwise.
+    #[getter]
+    fn constrained_atoms(&self) -> Vec<Vec<usize>> {
+        self.constrained.clone()
     }
 
     /// The kind of each coordinate: "bond", "angle", "torsion" or "phase angle".
@@ -775,7 +785,7 @@ impl System {
 
 // Python keyword arguments, so the count is set by the public signature.
 #[allow(clippy::too_many_arguments)]
-#[pyfunction(signature = (top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None, tree_bonds=false, phase_angles=true))]
+#[pyfunction(signature = (top_path, traj_path, start=None, stop=None, torsions_only=None, stride=None, tree_bonds=false, phase_angles=true, drop_constrained=false))]
 fn load_system(
     py: Python<'_>,
     top_path: &str,
@@ -786,6 +796,7 @@ fn load_system(
     stride: Option<usize>,
     tree_bonds: bool,
     phase_angles: bool,
+    drop_constrained: bool,
 ) -> PyResult<System> {
     let options = CoordinateOptions {
         bonds: if tree_bonds {
@@ -794,6 +805,7 @@ fn load_system(
             BondSet::HeavyAtom
         },
         phase_angles,
+        drop_constrained,
         ..Default::default()
     };
     py.allow_threads(move || {

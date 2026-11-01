@@ -780,7 +780,9 @@ fn build_bat_list(
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BondSet {
     /// Every bond between two heavy atoms, ring closures included. Bonds to
-    /// hydrogen are left out because they are usually constrained.
+    /// hydrogen are left out because they are usually constrained. With
+    /// [`CoordinateOptions::drop_constrained`], bonds to hydrogen are included
+    /// and only the constrained ones are left out.
     #[default]
     HeavyAtom,
     /// The bonds of the BAT spanning tree: the two root bonds and the bond
@@ -824,7 +826,23 @@ pub struct CoordinateOptions {
     pub phase_angles: bool,
     /// The angle and torsion formulas.
     pub geometry: Geometry,
+    /// Drop every bond and angle that the trajectory shows to be constrained:
+    /// one whose standard deviation over the frames read is below
+    /// [`CONSTRAINT_TOLERANCE`] times its mean. With the heavy-atom bond set,
+    /// bonds to hydrogen are then included and dropped only if constrained, so
+    /// a trajectory without SHAKE keeps them. A constrained coordinate has no
+    /// entropy, and its near-zero spread would make any estimate of it
+    /// meaningless. Torsions are never dropped. Off by default.
+    pub drop_constrained: bool,
 }
+
+/// The relative spread below which [`CoordinateOptions::drop_constrained`]
+/// treats a bond or angle as constrained. Constrained bonds to hydrogen spread
+/// by at most 1e-5 of their length (Amber SHAKE, OpenMM constraints), free
+/// bonds and angles by about 2e-2 at 300 K; the free spread scales with the
+/// square root of the temperature, so it stays above the tolerance down to a
+/// few kelvin.
+pub const CONSTRAINT_TOLERANCE: f64 = 1e-3;
 
 impl Default for CoordinateOptions {
     fn default() -> Self {
@@ -832,6 +850,7 @@ impl Default for CoordinateOptions {
             bonds: BondSet::default(),
             phase_angles: true,
             geometry: Geometry::default(),
+            drop_constrained: false,
         }
     }
 }
@@ -883,6 +902,12 @@ pub struct InternalCoordinates {
     /// Whether `calculate_internal_coords` dropped every coordinate but the
     /// torsions.
     torsions_only: bool,
+    /// The coordinates `calculate_internal_coords` dropped as constrained, as
+    /// BAT entries indexing into `atoms`.
+    constrained: Vec<Vec<usize>>,
+    /// Per frame, the ln J terms of the dropped coordinates, which
+    /// [`log_jacobian`](Self::log_jacobian) still includes.
+    constrained_log_jacobian: Vec<f64>,
     /// Solute bonds that lie on a ring, as sorted pairs of local indices.
     ring_bonds: Bonds,
     /// Non-ring bonds one end of which carries only two or more terminal atoms
@@ -899,6 +924,16 @@ pub struct InternalCoordinates {
     /// [`coordinate_pairs`](Self::coordinate_pairs). The estimators do not use
     /// it.
     pub pairs: Vec<(usize, usize)>,
+}
+
+/// A coordinate's term in ln J: 2 ln b for a bond, ln sin(theta) for an angle,
+/// 0 for a torsion.
+fn log_jacobian_term(entry: &[usize], value: f64) -> f64 {
+    match entry.len() {
+        2 => 2.0 * value.ln(),
+        3 => value.sin().ln(),
+        _ => 0.0,
+    }
 }
 
 /// Amber atom types that belong only to water models (including the extra
@@ -962,7 +997,10 @@ impl InternalCoordinates {
             if is_excluded(&prmtop, i) {
                 molecule_mask[i] = false;
             }
-            if (t.starts_with('H') || t.starts_with('h')) && t != "HW" {
+            // With drop_constrained, the trajectory decides which bonds to
+            // hydrogen go.
+            let hydrogen = (t.starts_with('H') || t.starts_with('h')) && t != "HW";
+            if hydrogen && !options.drop_constrained {
                 hydrogens.insert(i);
             }
         }
@@ -1042,6 +1080,8 @@ impl InternalCoordinates {
             natom: prmtop.natom,
             options,
             torsions_only: false,
+            constrained: Vec::new(),
+            constrained_log_jacobian: Vec::new(),
             ring_bonds: to_local(ring_bonds),
             symmetric_rotor_bonds: to_local(symmetric_rotor_bonds),
             dim,
@@ -1057,6 +1097,11 @@ impl InternalCoordinates {
     /// `torsions_only` first drops every coordinate but the torsions, for good:
     /// [`dim`](Self::dim) and every per-coordinate method then describe the
     /// torsions alone.
+    ///
+    /// With [`CoordinateOptions::drop_constrained`], every constrained bond and
+    /// angle is then dropped, for good, as with `torsions_only`; see
+    /// [`constrained_coordinates`](Self::constrained_coordinates). This needs
+    /// at least two frames.
     ///
     /// The trajectory must have exactly as many atoms as the topology. Phase
     /// angles and the chosen geometry are applied here, so calling this again
@@ -1101,6 +1146,9 @@ impl InternalCoordinates {
                 );
             }
         }
+        if self.options.drop_constrained {
+            self.drop_constrained()?;
+        }
         if self.options.phase_angles {
             let references = self.phase_references();
             for frame in self.int_coords.iter_mut() {
@@ -1112,6 +1160,70 @@ impl InternalCoordinates {
             }
         }
         Ok(())
+    }
+
+    /// Drops the bonds and angles whose relative spread over the frames is
+    /// below [`CONSTRAINT_TOLERANCE`], keeping their ln J terms.
+    fn drop_constrained(&mut self) -> Result<()> {
+        let frames = self.int_coords.len();
+        if frames < 2 {
+            return Err(format!(
+                "finding constrained coordinates needs at least 2 frames, got {frames}"
+            )
+            .into());
+        }
+        let n = frames as f64;
+        let constrained: Vec<bool> = (0..self.dim)
+            .map(|c| {
+                if self.bat_list[c].len() == 4 {
+                    return false;
+                }
+                let mean = self.int_coords.iter().map(|f| f[c]).sum::<f64>() / n;
+                let variance = self
+                    .int_coords
+                    .iter()
+                    .map(|f| (f[c] - mean).powi(2))
+                    .sum::<f64>()
+                    / n;
+                variance.sqrt() < CONSTRAINT_TOLERANCE * mean.abs()
+            })
+            .collect();
+        self.constrained_log_jacobian = self
+            .int_coords
+            .iter()
+            .map(|frame| {
+                self.bat_list
+                    .iter()
+                    .zip(frame)
+                    .zip(&constrained)
+                    .filter(|(_, dropped)| **dropped)
+                    .map(|((entry, &value), _)| log_jacobian_term(entry, value))
+                    .sum()
+            })
+            .collect();
+        for frame in self.int_coords.iter_mut() {
+            let mut dropped = constrained.iter();
+            frame.retain(|_| !dropped.next().unwrap());
+        }
+        let mut dropped = constrained.iter();
+        let (constrained, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.bat_list)
+            .into_iter()
+            .partition(|_| *dropped.next().unwrap());
+        self.bat_list = kept;
+        self.constrained = constrained;
+        self.dim = self.bat_list.len();
+        Ok(())
+    }
+
+    /// Topology atom indices of each coordinate dropped as constrained (see
+    /// [`CoordinateOptions::drop_constrained`]), in the layout of
+    /// [`coordinate_atoms`](Self::coordinate_atoms). Empty until a trajectory
+    /// is read, and always empty without `drop_constrained`.
+    pub fn constrained_coordinates(&self) -> Vec<Vec<usize>> {
+        self.constrained
+            .iter()
+            .map(|entry| entry.iter().map(|&local| self.atoms[local]).collect())
+            .collect()
     }
 
     /// Re-evaluates every angle and torsion with the legacy formulas.
@@ -1259,7 +1371,8 @@ impl InternalCoordinates {
     /// coordinates. Bond lengths are in the trajectory's units.
     ///
     /// Defined only for the full non-redundant set: `BondSet::Tree`, without
-    /// `torsions_only`. Phase angles do not change it.
+    /// `torsions_only`. Phase angles do not change it, and coordinates dropped
+    /// as constrained still contribute their terms.
     pub fn log_jacobian(&self) -> Result<Vec<f64>> {
         if self.options.bonds != BondSet::Tree {
             return Err("the BAT Jacobian needs the tree bond set".into());
@@ -1270,16 +1383,19 @@ impl InternalCoordinates {
         Ok(self
             .int_coords
             .iter()
-            .map(|frame| {
+            .enumerate()
+            .map(|(index, frame)| {
+                let constrained = self
+                    .constrained_log_jacobian
+                    .get(index)
+                    .copied()
+                    .unwrap_or(0.0);
                 self.bat_list
                     .iter()
                     .zip(frame)
-                    .map(|(entry, value)| match entry.len() {
-                        2 => 2.0 * value.ln(),
-                        3 => value.sin().ln(),
-                        _ => 0.0,
-                    })
-                    .sum()
+                    .map(|(entry, &value)| log_jacobian_term(entry, value))
+                    .sum::<f64>()
+                    + constrained
             })
             .collect())
     }
