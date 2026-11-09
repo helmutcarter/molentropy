@@ -6,6 +6,9 @@ change the API or the default estimates.
 
 ## [Unreleased]
 
+- Python 3.13 and 3.14 support: the bindings now use PyO3 0.30 and
+  rust-numpy 0.30 (from 0.21), `requires-python` no longer stops at 3.12,
+  and releases build wheels for Python 3.10 to 3.14.
 - Constrained-coordinate detection (`--drop-constrained`,
   `drop_constrained=True` in `load_system`,
   `CoordinateOptions::drop_constrained`): drops every bond and angle that the
