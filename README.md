@@ -4,7 +4,7 @@
 
 Estimate the configurational entropy of a molecular system, with a Rust library, CLI, and Python bindings.
 
-The crate converts Amber trajectories to internal coordinates (bond lengths, bond angles, and torsions) and estimates their entropy. File-based calculations use linear metrics for bonds and angles and a 2π-periodic metric for torsions.
+The package converts Amber trajectories to internal coordinates (bond lengths, bond angles, and torsions) and provides several entropy estimators to apply. 
 
 ## Features
 - Estimators: the nearest-neighbor mutual information expansion (NN MIE) up to fourth order, with pairwise mutual information; the mutual information spanning tree (MIST) and its extension to a Bayesian network; quasi-harmonic (QH) and Boltzmann quasi-harmonic (BQH) entropy; and a split estimator that treats soft torsions non-parametrically and stiff coordinates with a Gaussian. Every estimator but the joint nearest-neighbor estimate can also report each coordinate's share of the entropy.
