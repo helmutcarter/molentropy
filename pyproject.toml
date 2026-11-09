@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "molentropy"
 description = "Estimate the configurational entropy of a molecule from a molecular dynamics trajectory."
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.10"
 license = { text = "MIT OR Apache-2.0" }
 authors = [
     { name = "Helmut Carter", email = "helmut.carter@lehman.cuny.edu" },

@@ -4,7 +4,6 @@
 //! documents the Python API: <https://helmutcarter.github.io/molentropy/python.html>. Every function wraps an estimator of this crate and releases
 //! the GIL while it runs.
 
-#![allow(unsafe_op_in_unsafe_fn)]
 use crate::basins::{BasinOptions, detect_basins as detect_basins_impl};
 use crate::bat_library::{BondSet, CoordinateKind, CoordinateOptions, InternalCoordinates};
 use crate::quasi_harmonic::{MarginalEstimator, PeriodicCorrelation, QuasiHarmonicOptions};
@@ -418,16 +417,17 @@ type CoordinateShares = (Vec<f64>, Vec<f64>, Vec<f64>);
 fn split_to_dict(
     py: Python<'_>,
     (result, shares): (SplitEntropy, Option<CoordinateShares>),
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     if result.soft_coordinates.len() > LARGE_SOFT_SET {
-        PyErr::warn_bound(
+        PyErr::warn(
             py,
-            &py.get_type_bound::<pyo3::exceptions::PyUserWarning>(),
-            &large_soft_set_warning(result.soft_coordinates.len()),
+            &py.get_type::<pyo3::exceptions::PyUserWarning>(),
+            &std::ffi::CString::new(large_soft_set_warning(result.soft_coordinates.len()))
+                .map_err(to_py_err)?,
             1,
         )?;
     }
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("total", result.total)?;
     dict.set_item("soft", result.soft)?;
     dict.set_item("hard", result.hard)?;
@@ -438,20 +438,20 @@ fn split_to_dict(
     match result.states {
         None => dict.set_item("states", py.None())?,
         Some(summary) => {
-            let states = PyDict::new_bound(py);
+            let states = PyDict::new(py);
             states.set_item("defining", summary.defining)?;
             states.set_item("dropped_frames", summary.dropped_frames)?;
             states.set_item("dropped_population", summary.dropped_population)?;
-            let list: Vec<PyObject> = summary
+            let list: Vec<Py<PyAny>> = summary
                 .states
                 .into_iter()
-                .map(|state| -> PyResult<PyObject> {
-                    let entry = PyDict::new_bound(py);
+                .map(|state| -> PyResult<Py<PyAny>> {
+                    let entry = PyDict::new(py);
                     entry.set_item("basins", state.basins)?;
                     entry.set_item("frames", state.frames)?;
                     entry.set_item("population", state.population)?;
                     entry.set_item("hard_entropy", state.hard_entropy)?;
-                    Ok(entry.into_py(py))
+                    Ok(entry.into_any().unbind())
                 })
                 .collect::<PyResult<_>>()?;
             states.set_item("states", list)?;
@@ -459,13 +459,13 @@ fn split_to_dict(
         }
     }
     if let Some((total, own, coupling)) = shares {
-        let coordinates = PyDict::new_bound(py);
+        let coordinates = PyDict::new(py);
         coordinates.set_item("total", total)?;
         coordinates.set_item("own", own)?;
         coordinates.set_item("coupling", coupling)?;
         dict.set_item("coordinates", coordinates)?;
     }
-    Ok(dict.into_py(py))
+    Ok(dict.into_any().unbind())
 }
 
 /// The data, frame count and metrics of a System or an array. `periodic=False`
@@ -629,7 +629,7 @@ impl System {
         exact_constant: bool,
         theiler_window: usize,
     ) -> PyResult<f64> {
-        py.allow_threads(|| {
+        py.detach(|| {
             crate::calculate_entropy(
                 &self.one_d_data,
                 self.frames,
@@ -649,7 +649,7 @@ impl System {
         exact_constant: bool,
         theiler_window: usize,
     ) -> PyResult<Vec<f64>> {
-        py.allow_threads(|| {
+        py.detach(|| {
             crate::estimate_coordinate_entropy(
                 &self.one_d_data,
                 self.frames,
@@ -671,7 +671,7 @@ impl System {
         exact_constant: bool,
         theiler_window: usize,
     ) -> PyResult<HashMap<&'static str, f64>> {
-        py.allow_threads(|| {
+        py.detach(|| {
             quasi_harmonic(
                 &self.one_d_data,
                 self.frames,
@@ -696,7 +696,7 @@ impl System {
         exact_constant: bool,
         theiler_window: usize,
     ) -> PyResult<HashMap<&'static str, Vec<f64>>> {
-        py.allow_threads(|| {
+        py.detach(|| {
             coordinate_quasi_harmonic(
                 &self.one_d_data,
                 self.frames,
@@ -733,7 +733,7 @@ impl System {
         theiler_window: usize,
         per_coordinate: bool,
         network_parents: usize,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<Py<PyAny>> {
         let arguments = SplitArguments::new(
             soft,
             soft_estimator,
@@ -750,7 +750,7 @@ impl System {
             network_parents,
         )?;
         let metrics = self.metrics_for(periodic);
-        let result = py.allow_threads(|| {
+        let result = py.detach(|| {
             arguments.estimate(
                 &self.one_d_data,
                 self.frames,
@@ -772,7 +772,7 @@ impl System {
         exact_constant: bool,
         theiler_window: usize,
     ) -> PyResult<Vec<f64>> {
-        py.allow_threads(|| {
+        py.detach(|| {
             crate::estimate_coordinate_mutual_information(
                 &self.one_d_data,
                 self.frames,
@@ -808,7 +808,7 @@ fn load_system(
         drop_constrained,
         ..Default::default()
     };
-    py.allow_threads(move || {
+    py.detach(move || {
         system_from_trajectory(
             top_path,
             traj_path,
@@ -834,7 +834,7 @@ fn estimate_entropy(
     theiler_window: usize,
 ) -> PyResult<f64> {
     let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
-    py.allow_threads(move || {
+    py.detach(move || {
         crate::calculate_entropy(
             &one_d_data,
             frames_end,
@@ -859,7 +859,7 @@ fn estimate_coordinate_entropy(
     theiler_window: usize,
 ) -> PyResult<Vec<f64>> {
     let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
-    py.allow_threads(move || {
+    py.detach(move || {
         crate::estimate_coordinate_entropy(
             &one_d_data,
             frames_end,
@@ -881,7 +881,7 @@ fn estimate_coordinate_mutual_information(
     theiler_window: usize,
 ) -> PyResult<Vec<f64>> {
     let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
-    py.allow_threads(move || {
+    py.detach(move || {
         crate::estimate_coordinate_mutual_information(
             &one_d_data,
             frames_end,
@@ -911,7 +911,7 @@ fn estimate_quasi_harmonic_entropy(
     theiler_window: usize,
 ) -> PyResult<HashMap<&'static str, f64>> {
     let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
-    py.allow_threads(move || {
+    py.detach(move || {
         quasi_harmonic(
             &one_d_data,
             frames_end,
@@ -941,7 +941,7 @@ fn estimate_coordinate_quasi_harmonic_entropy(
     theiler_window: usize,
 ) -> PyResult<HashMap<&'static str, Vec<f64>>> {
     let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
-    py.allow_threads(move || {
+    py.detach(move || {
         coordinate_quasi_harmonic(
             &one_d_data,
             frames_end,
@@ -983,7 +983,7 @@ fn estimate_split_entropy(
     theiler_window: usize,
     per_coordinate: bool,
     network_parents: usize,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     if let Ok(system) = data.extract::<PyRef<'_, System>>() {
         if periods.is_some() {
             return Err(pyo3::exceptions::PyValueError::new_err(
@@ -1027,7 +1027,7 @@ fn estimate_split_entropy(
         network_parents,
     )?;
     let (one_d_data, frames_end, metrics) = one_d_data_from_py(data, periods, periodic)?;
-    let result = py.allow_threads(|| {
+    let result = py.detach(|| {
         arguments.estimate(
             &one_d_data,
             frames_end,
@@ -1056,7 +1056,7 @@ fn detect_basins(
     saddle_fraction: f64,
     min_population: f64,
     free_rotor_resultant: Option<f64>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let options = BasinOptions {
         bins,
         smoothing,
@@ -1066,18 +1066,18 @@ fn detect_basins(
     };
     let basins = detect_basins_impl(&values, CoordinateMetric::Periodic { period }, &options)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     dict.set_item("soft", basins.is_soft(&options))?;
     dict.set_item("count", basins.count)?;
     dict.set_item("labels", basins.labels)?;
     dict.set_item("boundaries", basins.boundaries)?;
     dict.set_item("populations", basins.populations)?;
     dict.set_item("resultant", basins.resultant)?;
-    Ok(dict.into_py(py))
+    Ok(dict.into_any().unbind())
 }
 
 #[pymodule]
-fn molentropy(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn molentropy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<System>()?;
     m.add_function(wrap_pyfunction!(load_system, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_entropy, m)?)?;
