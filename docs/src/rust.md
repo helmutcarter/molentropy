@@ -4,7 +4,7 @@ The crate is not on crates.io; depend on a release tag through git, so the estim
 
 ```toml
 [dependencies]
-molentropy = { git = "https://github.com/helmutcarter/molentropy", tag = "v0.1.0" }
+molentropy = { git = "https://github.com/helmutcarter/molentropy", tag = "v0.1.1" }
 ```
 
 Every public item has API documentation, with examples that are compiled and tested:

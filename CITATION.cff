@@ -15,8 +15,8 @@ authors:
   - family-names: Kurtzman
     given-names: Tom
     affiliation: "Department of Chemistry, Lehman College, The City University of New York"
-version: 0.1.0
-date-released: "2026-10-26"
+version: 0.1.1
+date-released: "2026-11-09"
 license:
   - MIT
   - Apache-2.0
