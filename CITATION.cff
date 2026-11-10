@@ -1,3 +1,5 @@
+# Zenodo reads .zenodo.json instead of this file (it accepts only one license);
+# keep the authors and description there in sync.
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
@@ -5,8 +7,8 @@ title: molentropy
 abstract: >-
   Estimates the configurational entropy of a molecule from a molecular dynamics
   trajectory in internal coordinates, with nearest-neighbor mutual information
-  expansion, mutual information spanning tree, quasi-harmonic, Boltzmann
-  quasi-harmonic and split soft/hard estimators.
+  expansion, mutual information spanning tree, Bayesian network, quasi-harmonic,
+  Boltzmann quasi-harmonic and split soft/hard estimators.
 authors:
   - family-names: Carter
     given-names: Helmut
