@@ -6,6 +6,8 @@ change the API or the default estimates.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-09
+
 - Python 3.13 and 3.14 support: the bindings now use PyO3 0.30 and
   rust-numpy 0.30 (from 0.21), `requires-python` no longer stops at 3.12,
   and releases build wheels for Python 3.10 to 3.14.
@@ -49,4 +51,5 @@ First release, under the name molentropy (previously nn-entropy).
 - Validation against HREX/MBAR reference entropies of small molecules and
   peptides at 300 K.
 
+[0.1.1]: https://github.com/helmutcarter/molentropy/releases/tag/v0.1.1
 [0.1.0]: https://github.com/helmutcarter/molentropy/releases/tag/v0.1.0

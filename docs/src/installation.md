@@ -5,7 +5,7 @@
 Each [release](https://github.com/helmutcarter/molentropy/releases) has prebuilt wheels for Python 3.10 to 3.14 (3.10 to 3.12 for v0.1.0) on Linux (x86_64, aarch64), macOS (arm64, x86_64) and Windows (x86_64). pip can pick the right one from the release page:
 
 ```bash
-pip install molentropy --find-links https://github.com/helmutcarter/molentropy/releases/expanded_assets/v0.1.0
+pip install molentropy --find-links https://github.com/helmutcarter/molentropy/releases/expanded_assets/v0.1.1
 ```
 
 or download the wheel for your Python and platform and `pip install` the file.
