@@ -88,9 +88,11 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
+      # The test profile (opt-level 1) runs the suite fast enough; --release
+      # would add fat LTO to every instrumented test binary.
       - name: Measure coverage
         run: |
-          cargo llvm-cov --release --locked --no-fail-fast --summary-only \
+          cargo llvm-cov --locked --no-fail-fast --summary-only \
             --ignore-filename-regex 'pyo3_api\.rs' | tee coverage.txt
           {
             echo '## Test coverage (Python bindings excluded)'
