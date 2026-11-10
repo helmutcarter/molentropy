@@ -1,0 +1,23 @@
+{
+  "upload_type": "software",
+  "title": "molentropy",
+  "description": "Estimates the configurational entropy of a molecule from a molecular dynamics trajectory in internal coordinates, with nearest-neighbor mutual information expansion, mutual information spanning tree, Bayesian network, quasi-harmonic, Boltzmann quasi-harmonic and split soft/hard estimators.",
+  "creators": [
+    {
+      "name": "Carter, Helmut",
+      "affiliation": "Ph.D. Program in Biology, The Graduate Center of the City University of New York"
+    },
+    {
+      "name": "Kurtzman, Tom",
+      "affiliation": "Department of Chemistry, Lehman College, The City University of New York"
+    }
+  ],
+  "license": "MIT",
+  "notes": "molentropy is dual-licensed under the MIT license or the Apache License, Version 2.0, at your option (LICENSE-MIT and LICENSE-APACHE in the archive). Zenodo records a single license, so MIT is listed above.",
+  "keywords": [
+    "entropy",
+    "molecular dynamics",
+    "mutual information",
+    "quasi-harmonic analysis"
+  ]
+}
